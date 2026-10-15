@@ -149,7 +149,7 @@ python3 -m unittest discover -s tests -v
 |---|---|
 | 版本負責人（woowtech） | 合併本 repo 的清冊 PR；決定 lockstep 或 range、目標版本；核准例外（`approved_by`） |
 | HA 各 repo 維護者 | 合併 HA 端的 PR；Store 同步自動進行 |
-| PaaS 覆核者（Eugene） | 合併 seed 與 charts PR；paas-odoo-ci `/approve` 由人簽 |
+| PaaS 覆核者 | 合併 seed 與 charts PR；paas-odoo-ci `/approve` 由人簽 |
 | 平台營運 | 發版、CD、租戶 Redeploy（範本對齊不等於線上服務已對齊） |
 | 機器人／agent | 只開 PR、跑測試、維護追蹤 issue；**不合併 Gitea PR、不簽 `/approve`** |
 

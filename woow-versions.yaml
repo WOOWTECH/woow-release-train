@@ -321,16 +321,17 @@ products:
       - "PaaS 升 2.43.6 進行中：JCR 鏡像 n8n:20261015.2140 ← docker.io/n8nio/n8n@sha256:371dd463…（amd64）待 paas-odoo-ci /approve，之後才有 seed PR；遷移單向，既有服務逐台備份後 Redeploy。"
 
 # 線上實際部署的手動快照（非真相來源，只供 drift 報告參考；第 1 期起改由 operator 回報）。
+# 本 repo 有公開鏡像：只寫數量與版本，不寫租戶的服務 ID／工作區名稱。
 observations:
   - product: n8n
     as_of: "2026-10-16"
     source: "kubectl get deploy（pi-agent，唯讀）"
-    summary: "4 個 PaaS 服務：svc-（已移除）、svc-（已移除）（paas-ws-（已移除））跑 2.35.3（a3693cff，低於下限 2.38.0）；svc-（已移除）、svc-（已移除） 跑 2.38.0（e0e7b603）"
+    summary: "4 個 PaaS 服務：2 個跑 2.35.3（amd64 a3693cff，低於下限 2.38.0，同一工作區）；2 個跑 2.38.0（e0e7b603）"
   - product: emqx
     as_of: "2026-10-16"
     source: "kubectl get deploy（pi-agent，唯讀）"
-    summary: "2 個 PaaS 服務（svc-（已移除）、svc-（已移除））跑 5.8.9（amd64 8b92a101）＝ seed"
+    summary: "2 個 PaaS 服務跑 5.8.9（amd64 8b92a101）＝ seed"
   - product: litellm
     as_of: "2026-10-16"
     source: "kubectl get deploy（pi-agent，唯讀）"
-    summary: "svc-（已移除） 跑 seed 映像 20261015.0956；svc-（已移除） 仍是 20261014.0718（舊包裝，待 Redeploy）；包裝映像的 base digest 需 JCR 憑證才能讀回，本次未驗"
+    summary: "2 個 PaaS 服務：1 個跑 seed 映像 20261015.0956；1 個仍是 20261014.0718（舊包裝，待 Redeploy）；包裝映像的 base digest 需 JCR 憑證才能讀回，本次未驗"
