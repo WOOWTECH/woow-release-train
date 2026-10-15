@@ -1,0 +1,21 @@
+name: CI
+
+# 清冊格式／一致性／例外到期 + wvt 單元測試。只擋本 repo（清冊 PR），不擋任何 HA／PaaS 流程。
+# 只用 Python 標準函式庫：runner 映像不必裝 PyYAML（tests 若偵測到 PyYAML 會順便交叉比對解析結果）。
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  validate-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python
+        run: python3 --version
+      - name: wvt validate
+        run: python3 tools/wvt.py validate
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v

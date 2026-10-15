@@ -1,0 +1,10 @@
+name: Woow LiteLLM
+version: 0.1.11
+slug: woow-litellm
+description: LiteLLM AI gateway (OpenAI-compatible) with built-in PostgreSQL
+url: https://github.com/WOOWTECH/Woow_ha_litellm
+# Prebuilt by .github/workflows/publish-litellm-addon-images.yml. Never built on Home Assistant.
+image: ghcr.io/woowtech/woow-ha-litellm-{arch}
+arch:
+  - amd64 # aarch64 in a later release (D-11 a)
+stage: experimental

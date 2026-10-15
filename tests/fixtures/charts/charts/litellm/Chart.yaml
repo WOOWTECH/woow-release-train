@@ -1,0 +1,201 @@
+apiVersion: v2
+name: litellm
+description: |
+  LiteLLM AI model gateway cloud service chart — one gateway per tenant, with
+  its own PostgreSQL and exactly ONE volume.
+
+  Entrance: the LiteLLM proxy on port 4000 (ClusterIP → subdomain →
+  Cloudflare tunnel). It is the OpenAI-compatible API (/v1/...), the admin UI
+  (/ui) and, when the tenant keeps it on, the Swagger page (/docs). Other
+  services in the same workspace call it in-cluster at
+  http://<release>-litellm:4000/v1 (no Cloudflare 100 MB / ~100 s limits).
+
+  Credentials (platform supply chain):
+    * UI login  — UI_USERNAME=admin / UI_PASSWORD = config.sensitive.admin_password
+      (admin_password_carrier = helm_secret: read from env at every start, so a
+      platform reset = Secret rewrite + rollout restart takes effect).
+    * master key — auth.apiServerKey, i.e. the platform's #530 gateway API key
+      channel (template seed gateway.externalPath = /v1): shown ONCE together
+      with https://<sub>/v1, replaced on every reset. Not sent → generated here.
+      LiteLLM 1.103/1.104 do NOT require an `sk-` prefix on the master key (the
+      master-key compare runs before the virtual-key prefix check) — the
+      platform's token_urlsafe(24) value is used verbatim. 1.104 refuses to
+      start only without a master key, with an empty one or with "sk-1234".
+    * salt key  — LITELLM_SALT_KEY encrypts every provider key the tenant stores
+      in the UI. Generated here once (sk- + 64 hex), kept by `lookup`, NEVER
+      rotated, and copied into the database itself (woow_platform.settings, on
+      the PostgreSQL volume). At every start the database's copy wins, so a
+      volume kept after the service was deleted and attached to a new release
+      (persistence existingClaim) still decrypts.
+    * PostgreSQL password — generated here; the Secret is authoritative and the
+      db-agent sidecar re-applies it to the role on start and on change (a kept
+      volume comes back with a new Secret, and initdb never runs twice).
+
+  ChatGPT subscriptions (one or several accounts): the tenant signs in with ChatGPT
+  (Plus/Pro) in LiteLLM's own LLM Credentials or on its page /woow/chatgpt (LiteLLM admin
+  login; files/woow_chatgpt_plugin.py)
+  in the proxy container); the tokens sit on tmpfs with a copy in the database
+  (woow_platform.chatgpt_auth), so the sign-in survives restarts and upgrades.
+
+  Provider keys and models live ONLY in the tenant's own database
+  (STORE_MODEL_IN_DB): the chart ships an empty model_list and no provider
+  key fields at all.
+
+  Schema migration: one migrator per rollout — the `migrate` initContainer
+  (same image, prisma migrate deploy via litellm/proxy/prisma_migration.py);
+  the proxy itself runs with DISABLE_SCHEMA_UPDATE=true; Deployment strategy
+  Recreate; no helm hooks (a pre-install hook would run before the in-chart
+  database exists, and the operator installs without --wait).
+
+  Backups: logical pg_dump files on the SAME volume (backups/ next to
+  pgdata/) — daily (keep 7) and right before any migration to a new image
+  (keep 3). They guard against a bad migration or a mistaken delete, not
+  against losing the volume. No second PVC (workspace PVC quota is 10).
+
+  Upstream: https://github.com/BerriAI/litellm (MIT outside enterprise/; no
+  LITELLM_LICENSE is ever set, so only the MIT feature set runs). Image:
+  ghcr.io/berriai/litellm-non_root (uid 65534), cosign-signed upstream,
+  mirrored into JCR with its digest preserved.
+  Replaces the single-instance WOOWTECH/Woow_k3s_litellm layout (fixed names,
+  self-created namespace, root image, floating tags, in-chart cloudflared and
+  five hard-wired OpenRouter models) for the PaaS. That repo and the
+  litellm.woowtech.io deployment are NOT touched by this chart.
+  Deployed per-tenant by paas-operator as svc-{ref[:8]} into a paas-ws-* namespace.
+type: application
+# 0.1.0 = first PaaS cut: litellm-non_root 1.103.3, paas-postgres 17.11,
+#         salt key copied into the database, pre-migration + daily pg_dump on
+#         the database volume, docs/Swagger and spend-log retention as tenant
+#         knobs.
+# 0.1.1 = (2026-10-04, prod .207 follow-up) UI_USERNAME travels through the chart
+#         Secret (key ui_username, from auth.adminUser) instead of a plain env value,
+#         so the platform can make the username tenant-editable
+#         (admin_username_helm_path = auth.adminUser) and show it in the one-time
+#         credentials window: with 0.1.0 a username change altered the pod template,
+#         so the platform's reset (`helm upgrade --atomic --timeout 15s`, then
+#         rollout restart) would wait for a new pod, time out and roll back — with
+#         the Recreate strategy that is two restarts (~4 min down) and a failed
+#         reset. auth.existingSecret keeps the plain env (unchanged).
+# 0.1.2 = (2026-10-07, #1441) workspace = LAN: same-namespace ingress/egress on
+#         every port, multicast/reserved ranges excluded from internet egress.
+# 0.2.0 = (2026-10-07) ChatGPT subscription (LiteLLM `chatgpt/` provider) as a
+#         platform-driven sign-in: files/woow_chatgpt.py runs the OAuth device
+#         flow over `kubectl exec` (paas-operator → code shown on the platform's
+#         service page, never in a pod log); tokens on tmpfs + a copy in the
+#         database (woow_platform.chatgpt_auth, created by db-prepare, restored by
+#         start-litellm.sh) — still one volume; sitecustomize guard: no in-request
+#         device login (fail fast 401 + hint, as upstream #39585 from 1.106),
+#         atomic 0600 token writes copied to the database, one refresh at a time.
+#         `add-models` registers chatgptSubscription.defaultModels. Image unchanged.
+# 0.2.1 = (2026-10-08) the ChatGPT sign-in moves INTO LiteLLM: files/woow_chatgpt_plugin.py
+#         serves /woow/chatgpt (page + API, LiteLLM proxy-admin only: the dashboard's
+#         session cookie, the master key or an admin key) — device code, status,
+#         disconnect, and the account's model list read live from ChatGPT
+#         (chatgpt.com/backend-api/codex/models) with select-all/add/remove/test;
+#         models LiteLLM's bundled map lacks (gpt-6*) are registered as
+#         mode=responses so /chat/completions is bridged instead of hitting
+#         /codex/chat/completions (Cloudflare 403). The platform card/operator path is
+#         retired. defaultModels: visible (every listed model) — 0.2.0's fixed list had
+#         three models ChatGPT refuses for Codex sign-ins. Same plugin works in any
+#         LiteLLM via litellm_settings.callbacks (DATABASE_URL or a persistent
+#         CHATGPT_TOKEN_DIR). The chart loads it through sitecustomize, not
+#         config.yaml, so a callbacks list set in the admin UI is never overridden.
+# 0.2.2 = (2026-10-08) the sign-in reachable from LiteLLM's own dashboard, like pi's login:
+#         ui-bridge.js (injected into /ui HTML by wrapping the dashboard's StaticFiles
+#         mount) — LLM Credentials → Add Credential → provider "ChatGPT Subscription":
+#         pressing "Add Credential" while not linked opens a sub-view in the dialog to
+#         pick 瀏覽器登入 (PKCE, paste the localhost redirect URL back; no ChatGPT setting
+#         needed) or 裝置代碼登入, then tick the account's models; the credential is saved
+#         with the default ChatGPT endpoint as its value (LiteLLM refuses an empty one —
+#         the "Failed to add credential" toast). ChatGPT rows get a status badge that opens
+#         /woow/chatgpt in an overlay. The page gains the same two login methods and an
+#         embed mode (frame-ancestors 'self'). WOOW_CHATGPT_UI_BRIDGE=false turns the
+#         dashboard bridge off.
+# 0.2.3 = (2026-10-09) several ChatGPT subscriptions per LiteLLM: one account per LiteLLM
+#         credential of provider "ChatGPT Subscription" (credential api_key = the reference
+#         woow-chatgpt:<account>; LiteLLM copies credential values into each request of a
+#         model that uses it), plus the default account for models naming none. The
+#         provider patch resolves the reference to that account's token and
+#         ChatGPT-Account-Id at request time (no token while LiteLLM merely builds a
+#         deployment → models can be added before their account is signed in). Same-named
+#         models on several accounts = one model group (LiteLLM spreads requests and retries
+#         a 429 on another account); "prefixed" naming keeps an account's models apart.
+#         Tokens: accounts/<id>.json on tmpfs + woow_platform.chatgpt_accounts (default
+#         mirrored to chatgpt_auth for rollback). Dashboard: Add Credential links a new
+#         account (or reuses a signed-in one), Edit re-signs in, Delete removes the
+#         account's models and sign-in; /woow/chatgpt lists and manages all accounts.
+# 0.2.4 = (2026-10-09) fix: a browser that cached a dashboard page before the bridge existed
+#         (0.2.1 and older) revalidated it (If-None-Match / If-Modified-Since), StaticFiles
+#         answered 304 and the old page — without ui-bridge.js — stayed in use: no ChatGPT
+#         panel, Add Credential → "Failed to add credential" (prod 10-09, a phone that had
+#         opened the dashboard on 10-08). The injector now drops conditional / range request
+#         headers, so every dashboard HTML request gets the full page with the bridge.
+# 0.2.5 = (2026-10-09) fixes from the first real two-account use (prod ws37):
+#         * a credential named with a trailing space (phone keyboard) could not be
+#           edited or deleted from the dashboard — the browser's URL parser strips the
+#           space from /credentials/<name> → 404; the bridge now percent-encodes such a
+#           name segment, trims the names of new credentials, and the "Delete
+#           Credential?" dialog (type the name to confirm) shows the hidden space and
+#           offers to fill the name in;
+#         * ChatGPT credentials made by 0.2.2 (no account reference) belong to the
+#           default account (that is where their requests go) instead of showing as
+#           unlinked — re-signing one in no longer creates an orphan account;
+#         * the same ChatGPT user cannot be connected to two accounts (limits are per
+#           user; it only doubled the models): duplicate_account with the other account
+#           named, nothing saved.
+# 0.2.6 = (2026-10-09) the Woow plugin works under a path prefix — Home Assistant Ingress
+#         (/api/hassio_ingress/<token>, X-Ingress-Path) or a LiteLLM SERVER_ROOT_PATH —
+#         so the HA "Woow LiteLLM" add-on can use the very same files (single source):
+#         the dashboard injector writes the prefixed ui-bridge.js URL; the bridge takes its
+#         base from its own script URL, the /woow/chatgpt page from its location; the
+#         page's "back to /ui" link follows. A key typed into the page is kept in memory
+#         only (no sessionStorage: in an HA sidebar the page shares the HA frontend's
+#         origin). PaaS behaviour unchanged (prefix "").
+# 0.3.0 = (2026-10-09) LiteLLM 1.103.3 → 1.104.0 (litellm-non_root, JCR mirror of index
+#         sha256:37066242…c01e), together with the HA "Woow LiteLLM" add-on (same image,
+#         same Woow plugin files). 5 new schema migrations (agent access groups,
+#         autorouter session rollup, policy attachment default, password-reset columns,
+#         agent kill switch) — the migrate initContainer applies them after the
+#         db-agent's pre-migration dump. New upstream: the dashboard's logout revokes
+#         its UI session server-side (POST /session/logout); the boot check refuses no /
+#         empty / "sk-1234" master key (the platform key is random). The Woow plugin
+#         needs no change: every LiteLLM symbol it patches or calls is unchanged in
+#         1.104.0 (signatures, OAuth constants, credential/model endpoints, the /ui
+#         mount, the dashboard's credential components).
+# 0.3.1 = woow_paas_platform #1637（容量研究，使用者 2026-10-10 核可）: general_settings
+#         store_prompts_in_spend_logs: false is locked in the config file (the tenant can no
+#         longer switch prompt storage on in the UI — rows grow ~10x and fill the 5Gi DB
+#         volume); the in-chart PostgreSQL CPU limit 500m → 1 (measured throttling 14.6%).
+# 0.3.2 = revoke dashboard session keys before startup when master/UI credentials
+#         change; preserve ordinary API keys and unchanged-restart sessions.
+#         First adoption revokes legacy dashboard sessions once.
+# 0.3.3 = ChatGPT models: the account catalog's context_window replaces LiteLLM's bundled
+#         (API) max_input_tokens, e.g. chatgpt/gpt-5.5 1050000 → 272000, so /model/info no
+#         longer depends on whether some deployment happened to carry the catalog value.
+#         Values a deployment or anyone else set (≠ the bundled value) are kept. Plugin only.
+# 0.3.4 = litellm_settings.budget_exceeded_status_code: 429 (values litellm.budgetExceededStatusCode),
+#         matching the HA add-on 0.1.9; pairs with the image's upstream guard (x-should-retry: false).
+# 0.3.5 = M4 first fix batch (R02, R14, R08), plugin + db-agent only, image unchanged:
+#         * R02: a request can no longer pick the ChatGPT account of a chatgpt/ model (api_key
+#           woow-chatgpt:<account>, litellm_credential_name, custom_llm_provider, any other key):
+#           400 invalid_request_error. The guard wraps ProxyLogging.pre_call_hook (the plugin's
+#           CustomLogger hook never ran: sitecustomize does not register callbacks) and the
+#           provider re-checks the router deployment's binding (router-level fallbacks too).
+#           A real ChatGPT access token (the caller's own sign-in) still passes.
+#         * R14: restore() per account; a newer database copy whose token file cannot be written
+#           stays in memory; the proxy adopts a newer database copy before an account's first
+#           token use; the start-up model sync waits for restore; /api/status reports the record
+#           requests use and connected=false after a refused refresh (covers the HA add-on's
+#           apply_restore_fix.py: db_save_failed is reported).
+#         * R08: dump retention only counts <kind>-<digits>*.dump and never the new file; a missing
+#           or empty dump is not recorded as predump_done. Trigger unchanged (once per image).
+version: 0.3.5
+appVersion: "1.104.0"
+kubeVersion: ">=1.24.0-0"
+keywords: [paas, litellm, llm, ai-gateway, openai, cloud-service]
+maintainers:
+  - name: WOOW PaaS Team
+home: https://git-prod.woowtech.io/woow-paas/woow-paas-charts
+sources:
+  - https://git-prod.woowtech.io/woow-paas/woow-paas-charts
+  - https://github.com/BerriAI/litellm
+  - https://github.com/WOOWTECH/Woow_k3s_litellm

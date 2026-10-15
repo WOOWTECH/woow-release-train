@@ -1,0 +1,12 @@
+---
+name: Woow EMQX
+version: "5.9.1"
+slug: woow-emqx
+description: The most scalable open-source MQTT broker for IoT (WOOWTECH fork)
+url: https://github.com/WOOWTECH/Woow_ha_emqx
+startup: services
+ingress: true
+ingress_port: 18083
+ingress_stream: true
+# Host network: Supervisor replaces [HOST] with the hassio network gateway
+# (the host itself), where the dashboard listens on all interfaces.
