@@ -30,6 +30,10 @@ sources:
     ref: main
     kind: cd_addon_ref
 
+# 只測連線、不影響漂移判定：第 2 期機器人要從 Gitea runner 打 GitHub API 開 PR。
+probes:
+  api.github.com: https://api.github.com/rate_limit
+
 products:
 
   # ------------------------------------------------------------------ EMQX

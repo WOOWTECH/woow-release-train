@@ -774,6 +774,9 @@ def validate_manifest(m: dict, today: _dt.date | None = None):
             E("sources.%s.repo invalid: %r" % (name, s.get("repo")))
         if not s.get("file"):
             E("sources.%s.file missing" % name)
+    for name, url in (m.get("probes") or {}).items():
+        if not str(url).startswith("https://"):
+            E("probes.%s must be an https URL" % name)
     prods = m.get("products")
     if not isinstance(prods, dict) or not prods:
         E("products must be a non-empty mapping")
@@ -1325,6 +1328,12 @@ def collect_drift(m: dict, f: Fetcher, today: _dt.date | None = None) -> dict:
             rows.extend(_shared_rows(p, pname, sf, f))
         for n in p.get("notes") or []:
             notes.append("**%s**：%s" % (pname, n))
+    # connectivity-only probes (do not affect drift): Phase 2 needs api.github.com for bot PRs
+    for name, url in (m.get("probes") or {}).items():
+        try:
+            f._get(url, endpoint=name)
+        except WvtError:
+            pass
     exceptions = []
     for pname, p in m["products"].items():
         for ex in p.get("exceptions") or []:
