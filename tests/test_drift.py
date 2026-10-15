@@ -84,6 +84,17 @@ class DriftTest(unittest.TestCase):
         self.assertEqual(sf["status"], "mismatch")
         self.assertTrue(any("woow_chatgpt.py" in f["message"] for f in sf["findings"]))
 
+    def test_connectivity_probe_does_not_change_drift(self):
+        class ProbeFail(FakeFetcher):
+            def _get(self, url, headers=None, endpoint=None):
+                self._probe(endpoint, "URLError: simulated")
+                raise wvt.WvtError("simulated")
+        self.m["probes"] = {"api.github.com": "https://api.github.com/rate_limit"}
+        base = self.collect()
+        rep = wvt.collect_drift(self.m, ProbeFail(), TODAY)
+        self.assertEqual(rep["probes"]["api.github.com"]["errors"], ["URLError: simulated"])
+        self.assertEqual([r["status"] for r in rep["rows"]], [r["status"] for r in base["rows"]])
+
     def test_expired_exception_marks_drift(self):
         rep = wvt.collect_drift(self.m, FakeFetcher(), dt.date(2026, 11, 20))
         self.assertTrue(any(e["days_left"] < 0 for e in rep["exceptions"]))

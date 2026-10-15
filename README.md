@@ -66,6 +66,7 @@ products:
     exceptions:                     # 必須有 what / reason / approved_by / expires；到期 validate 就失敗
       - { leg: ha, what: ..., reason: ..., approved_by: ..., expires: "YYYY-MM-DD", waives: [behind] }
 observations: [...]                 # 線上部署的手動快照（非真相來源，只供報告參考）
+probes: { api.github.com: https://api.github.com/rate_limit }   # 只測連線，不影響漂移判定
 ```
 
 ### 釘點（pin）與抽取器

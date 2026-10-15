@@ -6,7 +6,8 @@ name: Version drift
 #
 # 讀取跨 repo（paas-app-bundle-cd 是私人 repo）用 org secret CI_GITEA_TOKEN；
 # 寫本 repo 的 issue 用每次執行的 GITEA_TOKEN（permissions: issues: write）。
-# API 走叢集內網（同 paas-odoo-ci 的寫法），GitHub 走公開網址。
+# API 走叢集內網（同 paas-odoo-ci 的寫法），GitHub 走公開網址。gitea.server_url 在 runner 裡是內網位址，
+# 所以 issue 裡的執行連結寫死公開網址。
 on:
   schedule:
     - cron: "41 0 * * *"   # 台北 08:41
@@ -39,4 +40,4 @@ jobs:
         run: >-
           python3 tools/wvt.py issue --report drift.md --json drift.json
           --repo "${{ gitea.repository }}"
-          --run-url "${{ gitea.server_url }}/${{ gitea.repository }}/actions/runs/${{ gitea.run_id }}"
+          --run-url "https://git-prod.woowtech.io/${{ gitea.repository }}/actions/runs/${{ gitea.run_id }}"
