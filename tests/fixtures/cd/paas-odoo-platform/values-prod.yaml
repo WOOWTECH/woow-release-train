@@ -1,0 +1,18 @@
+# paas-odoo-platform — prod values (trimmed test fixture)
+profile: platform
+replicas: 1
+
+# ── image ──
+# mail-workspace inbox fix: SAME platform addon version .242 as the image it replaces.
+# Built from addon_ref v18.0.1.0.242; human approval CI#343; build20501.
+# Previous image: 20261015.1111@sha256:9cd62251d303be6953ed97f4c6f13eb4e8e0d52c1189fe81cf790c1b24091a64 (same .242).
+# 241: v18.0.1.0.241 / source 9a28b5d5; Built from addon_ref v18.0.1.0.241
+image:
+  registry: jcr-prod.woowtech.io
+  repository: woow-paas-docker-local/paas-odoo-official
+  tag: "20261015.1258"
+  digest: "sha256:b523b7c24af415ffb93a01a8710d2064d47424c99d7370bd34fe0412bfe21594"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: jcr

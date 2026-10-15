@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="0">
+        <record id="cloud_app_n8n" model="woow_paas_platform.cloud_app_template">
+            <field name="name">n8n</field>
+            <field name="slug">n8n</field>
+            <field name="description">工作流程自動化工具</field>
+            <field name="category">automation</field>
+            <field name="tags">["n8n", "automation", "workflow", "integration", "no-code"]</field>
+            <field name="documentation_url">https://docs.n8n.io/</field>
+            <field name="helm_repo_url"></field>
+            <field name="helm_chart_name">oci://8gears.container-registry.com/library/n8n</field>
+            <field name="helm_chart_version">2.0.1</field>
+            <field name="helm_default_values">{
+                "image": {"repository": "jcr-prod.woowtech.io/woow-paas-docker-local/n8n",
+                "tag": "20261013.2012@sha256:e0e7b603b43adc48d7123716b9eee7394dca675b410f574e4d24830e114564ce"},
+                "main":
+                {"config": {"GENERIC_TIMEZONE": "Asia/Taipei", "N8N_LOG_LEVEL": "info",
+                "N8N_PUBLIC_API_ENABLED": "true"},
+                "resources": {"requests": {"cpu": "100m", "memory": "256Mi"}, "limits": {"cpu":
+                "1000m", "memory": "1Gi"}},
+                "persistence": {"enabled": true, "type": "dynamic", "size": "2Gi"},
+                "livenessProbe": {"httpGet": {"path": "/healthz", "port": "http"},
+                "initialDelaySeconds": 180, "periodSeconds": 20, "timeoutSeconds": 5, "failureThreshold": 6},
+                "readinessProbe": {"httpGet": {"path": "/healthz/readiness", "port": "http"},
+                "periodSeconds": 10, "timeoutSeconds": 3, "failureThreshold": 3},
+                "secret": {"N8N_API_KEY": "set-by-platform-init"}},
+                "updateStrategy": {"type": "Recreate"}}</field>
+            <field name="default_port">5678</field>
+            <field name="ingress_enabled" eval="True" />
+            <field name="min_vcpu">1</field>
+            <field name="min_ram_gb">2.0</field>
+            <field name="min_storage_gb">5</field>
+            <field name="is_active" eval="True" />
+            <field name="mcp_enabled" eval="False" />
+            <field name="mcp_sidecar_image" eval="False" />
+            <field name="mcp_sidecar_env" eval="False" />
+            <field name="mcp_api_key_helm_path" eval="False" />
+            <field name="post_deploy_init_type">n8n</field>
+            <field name="post_deploy_init_email">admin@woowtech.io</field>
+            <field name="app_admin_reset_kind">n8n_exec</field>
+        </record>
+        <record id="cloud_app_emqx" model="woow_paas_platform.cloud_app_template">
+            <field name="name">EMQX</field>
+            <field name="slug">emqx</field>
+            <field name="description">開源 MQTT 訊息中介（broker）：物聯網裝置的連線與訊息轉送，附網頁管理後台。WebSocket 裝置直接連服務網址，原生 MQTT 對外透過你自己的 ngrok 帳號。1 vCPU／2 GB RAM／3 GB 磁碟</field>
+            <field name="category">automation</field>
+            <field name="tags">["emqx", "mqtt", "iot", "broker", "messaging"]</field>
+            <field name="documentation_url">https://github.com/WOOWTECH/Woow_k3s_emqx#readme</field>
+            <field name="helm_repo_url"></field>
+            <field name="helm_chart_name">oci://jcr-prod.woowtech.io/woow-paas-docker-local/emqx</field>
+            <field name="helm_chart_version">0.1.7</field>
+            <field name="helm_default_values">{"image":{"repository":"jcr-prod.woowtech.io/woow-paas-docker-local/emqx","tag":"20261002.0528@sha256:8b92a101d1a1642a191507b9133c46aad095bb64300dba1770108a2c7261b11a"},"ngrok":{"image":{"repository":"jcr-prod.woowtech.io/woow-paas-docker-local/ngrok","tag":"20261002.0258@sha256:4147f33ead67712d642fde29af4a9e258d7a937ef97be146397b7e2a2e8e8dd1"}},"emqx":{"resources":{"requests":{"cpu":"250m","memory":"512Mi"},"limits":{"cpu":"1","memory":"2Gi"}}},"persistence":{"data":{"size":"2Gi"},"log":{"size":"1Gi"}},"service":{"port":18083,"targetPort":18083}}</field>
+            <field name="default_port">18083</field>
+            <field name="ingress_enabled" eval="True"/>
+            <field name="min_vcpu">1</field>
+            <field name="min_ram_gb">2.0</field>
+            <field name="min_storage_gb">3</field>
+            <field name="mcp_enabled" eval="False"/>
+            <field name="has_admin_gui" eval="True"/>
+            <field name="admin_password_carrier">app_managed</field>
+            <field name="admin_password_settable" eval="False"/>
+            <field name="has_public_tunnel_address" eval="True"/>
+            <field name="public_tunnel_label">對外 MQTT 位址</field>
+            <field name="post_deploy_init_type">none</field>
+            <field name="max_per_partner" eval="0"/>
+            <field name="is_hidden" eval="False"/>
+            <field name="is_active" eval="True"/>
+        </record>
+        <record id="cloud_app_litellm" model="woow_paas_platform.cloud_app_template">
+            <field name="name">AI 模型閘道（LiteLLM）</field>
+            <field name="slug">litellm</field>
+            <field name="description">OpenAI 相容的 AI 模型閘道：一個 API 端點接上 OpenAI、Anthropic、Google、OpenRouter 等多家模型，用虛擬金鑰分給各應用程式並控管預算與用量，附網頁管理後台與專屬資料庫。1 vCPU／4 GB RAM／5 GB 磁碟</field>
+            <field name="category">ai_llm</field>
+            <field name="tags">["litellm", "llm", "ai-gateway", "openai", "proxy"]</field>
+            <field name="documentation_url">https://docs.litellm.ai/docs/</field>
+            <field name="helm_repo_url"></field>
+            <field name="helm_chart_name">oci://jcr-prod.woowtech.io/woow-paas-docker-local/litellm</field>
+            <field name="helm_chart_version">0.3.5</field>
+            <field name="helm_default_values">{"image":{"repository":"jcr-prod.woowtech.io/woow-paas-docker-local/litellm","tag":"20261015.0956@sha256:35a2eca3fbc0edcd4da8de2bcf3d05248198b790da6d7dca9e1b3584185f38b0"},"postgresql":{"image":{"repository":"jcr-prod.woowtech.io/woow-paas-docker-local/paas-postgres","tag":"17.11-20260928.1549@sha256:dbd1fed8882043f45bf759e8f7c73092505ef0afef7a23a93b177e6f7c2c840f"},"resources":{"limits":{"cpu":"1"}}},"gateway":{"externalPath":"/v1"},"auth":{"adminUser":"admin"},"persistence":{"size":"5Gi"},"service":{"port":4000}}</field>
+            <field name="default_port">4000</field>
+            <field name="ingress_enabled" eval="True"/>
+            <field name="min_vcpu">1</field>
+            <field name="min_ram_gb">4.0</field>
+            <field name="min_storage_gb">5</field>
+            <field name="mcp_enabled" eval="False"/>
+            <field name="has_admin_gui" eval="True"/>
+            <field name="admin_password_carrier">helm_secret</field>
+            <field name="admin_password_settable" eval="True"/>
+            <field name="admin_username_helm_path">auth.adminUser</field>
+            <field name="gateway_api_key_hint">這是 LiteLLM 的 master key（等同管理員金鑰）。應用程式請一律在 LiteLLM 後台建立虛擬金鑰使用，master key 只給管理腳本。</field>
+            <field name="gateway_url_hint">OpenAI 相容 API 的 Base URL。同工作區其他服務請改用內部網址 http://&lt;服務 release&gt;-litellm:4000/v1。</field>
+            <field name="post_deploy_init_type">none</field>
+            <field name="max_per_partner" eval="0"/>
+            <field name="is_hidden" eval="False"/>
+            <field name="is_active" eval="True"/>
+        </record>
+    </data>
+</odoo>

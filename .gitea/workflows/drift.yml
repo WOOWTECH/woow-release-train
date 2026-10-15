@@ -1,0 +1,42 @@
+name: Version drift
+
+# 第 0 期：只報告。每天抓 HA（GitHub 公開 raw）與 PaaS（Gitea API）的現況，和清冊比對，
+# 維護「一張」帶 version-drift label 的追蹤 issue：有落後就建立／更新，沒有就留言後關閉。
+# 本 job 永遠不擋任何流程，也不開 PR、不合併。
+#
+# 讀取跨 repo（paas-app-bundle-cd 是私人 repo）用 org secret CI_GITEA_TOKEN；
+# 寫本 repo 的 issue 用每次執行的 GITEA_TOKEN（permissions: issues: write）。
+# API 走叢集內網（同 paas-odoo-ci 的寫法），GitHub 走公開網址。
+on:
+  schedule:
+    - cron: "41 0 * * *"   # 台北 08:41
+  workflow_dispatch: {}
+
+concurrency:
+  group: version-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect drift (report-only)
+        env:
+          GITEA_API_URL: http://gitea-http.gitea.svc.cluster.local:3000/api/v1
+          GITEA_READ_TOKEN: ${{ secrets.CI_GITEA_TOKEN }}
+        run: |
+          python3 tools/wvt.py drift --out drift.md --json drift.json
+          cat drift.md
+      - name: Sync tracking issue
+        env:
+          GITEA_API_URL: http://gitea-http.gitea.svc.cluster.local:3000/api/v1
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+        run: >-
+          python3 tools/wvt.py issue --report drift.md --json drift.json
+          --repo "${{ gitea.repository }}"
+          --run-url "${{ gitea.server_url }}/${{ gitea.repository }}/actions/runs/${{ gitea.run_number }}"

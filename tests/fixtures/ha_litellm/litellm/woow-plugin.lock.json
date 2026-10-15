@@ -1,0 +1,32 @@
+{
+  "_comment": "Woow plugin copy (DESIGN v3.2 \u00a75.9). Written by tools/sync-woow-plugin.sh; checked by tools/verify-woow-plugin.sh and tests/test_config_contract.py. Do not edit the copies.",
+  "license": "MIT",
+  "source": {
+    "repository": "woow-paas/woow-paas-charts",
+    "url": "https://git-prod.woowtech.io/woow-paas/woow-paas-charts",
+    "path": "charts/litellm/files/",
+    "commit": "4ad95a11d8dad671b342d6cc9454c87a3130e8b6",
+    "branch": "origin/HEAD",
+    "chart_version": "0.3.5",
+    "merged_to_main": true
+  },
+  "destination": "litellm/rootfs/usr/share/woow-litellm/py/",
+  "synced_at": "2026-10-15T07:40:54Z",
+  "files": {
+    "sitecustomize.py": {
+      "git_blob": "f5407aacd4ed0d0202da7d6c578ef6a267b8a45b",
+      "sha256": "ff203522b00575aa70f8b8369efb526d976f83dbcff869857bb97b68c6945187",
+      "size": 662
+    },
+    "woow_chatgpt.py": {
+      "git_blob": "527c16c68a83958cc2f124253632b98de20b56c6",
+      "sha256": "939ddc581835069fc25941dd9b3ce5c0537643dfe3d412ee36aee76c7f770117",
+      "size": 66248
+    },
+    "woow_chatgpt_plugin.py": {
+      "git_blob": "cfcd0f65c257f44db3e995ea6fd635e76c7255f3",
+      "sha256": "1547b4ceac947e0d4c0e1f294e888b793455ae65b4cefc72b19796323231b0a3",
+      "size": 100172
+    }
+  }
+}

@@ -1,0 +1,30 @@
+# ── LiteLLM proxy (platform helm_default_values pins tag@sha256) ─────────────
+image:
+  # ghcr.io/berriai/litellm-non_root mirrored into JCR (skopeo --all
+  # --preserve-digests, so the digest is still the one upstream signed with
+  # cosign). The non-root variant runs as uid 65534; the plain image ends on
+  # `USER root`.
+  repository: jcr-prod.woowtech.io/woow-paas-docker-local/litellm
+  # Mirror tag of litellm-non_root 1.104.0. The platform pins `tag@sha256` in
+  # this one field; when `tag` already carries an `@sha256:` part, `digest`
+  # below is ignored. No appVersion fallback: JCR only has timestamp tags.
+  tag: "20261009.1344"
+  # Index digest of ghcr.io/berriai/litellm-non_root:1.104.0 (the HA "Woow
+  # LiteLLM" add-on is built on the same image).
+  digest: "sha256:37066242e6b8327fdd627682a66a9ae2a599553b4d5a84c905c6d8b9eb35c01e"
+  pullPolicy: IfNotPresent
+
+litellm:
+  # Public https URL of this service, injected by the platform when it has an
+  # `_inject_allowed_origins` entry for litellm (→ PROXY_BASE_URL: absolute
+  # links in invitation e-mails / SSO callbacks). "" is fine: the UI login
+  # redirect is built from the request, and the tunnel's X-Forwarded-Proto is
+  # trusted from forwardedAllowIps below.
+  publicUrl: ""
+  # The tunnel hop in front of this pod (k3s pod CIDR of woow-k3s). Used twice:
+  #  * general_settings.trusted_proxy_ranges — the admin-UI sign-in throttle
+  #    counts per source address only when this is set; without it every
+  #    tenant sits behind the same cloudflared IP and an attacker can lock the
+  #    `admin` account for everybody;
+  #  * FORWARDED_ALLOW_IPS (uvicorn) — so request.base_url is https://<sub>/.
+  trustedProxyRanges: ["10.42.0.0/16"]

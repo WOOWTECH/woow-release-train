@@ -1,0 +1,47 @@
+name: Mirror to GitHub
+
+# 單向推送：Gitea（主）→ GitHub 公開鏡像 WOOWTECH/woow-release-train（main 與所有 tag）。
+# 照 WOOWTECH/woow-mcp-server 的 mirror-github.yml：GitHub 憑證只有一把 deploy key
+# （repo secret GH_MIRROR_DEPLOY_KEY，只對該 GitHub repo 有寫入權）；GitHub 主機金鑰固定為官方
+# ed25519 指紋並嚴格驗證。GitHub 端不要直接改，下次鏡像會覆蓋（force + prune）。
+# 差異：woow-paas org 是私人 org，匿名 clone 會被拒，所以來源用 actions/checkout（帶本次執行的
+# GITEA_TOKEN）取得完整歷史與 tag，而不是匿名 `git clone --mirror`。
+on:
+  push:
+    branches: [main]
+    tags: ['**']
+  schedule:
+    - cron: '23 3 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-github
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Push main and tags to GitHub
+        env:
+          KEY: ${{ secrets.GH_MIRROR_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "${KEY}" || { echo "::error::GH_MIRROR_DEPLOY_KEY is not set"; exit 1; }
+          command -v ssh >/dev/null || { apt-get update -qq && apt-get install -y -qq openssh-client >/dev/null; }
+          d="$(mktemp -d)"; trap 'rm -rf "${d}"' EXIT
+          umask 077
+          printf '%s\n' "${KEY}" > "${d}/key"
+          printf 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n' > "${d}/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i ${d}/key -o IdentitiesOnly=yes -o UserKnownHostsFile=${d}/known_hosts -o StrictHostKeyChecking=yes"
+          git fetch -q --tags --force origin '+refs/heads/main:refs/remotes/origin/main'
+          git rev-parse --verify -q refs/remotes/origin/main >/dev/null || { echo "::error::source has no main; refusing to mirror"; exit 1; }
+          git push --prune git@github.com:WOOWTECH/woow-release-train.git '+refs/remotes/origin/main:refs/heads/main' '+refs/tags/*:refs/tags/*'
+          echo "mirrored main $(git rev-parse --short refs/remotes/origin/main) to github.com/WOOWTECH/woow-release-train"

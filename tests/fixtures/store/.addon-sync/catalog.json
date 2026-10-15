@@ -1,0 +1,67 @@
+{
+ "schema": 1,
+ "catalog_id": "sha256:3f6daa240efed51a00afacb10db42b5dc0e68536e30ccaa1ec4779e7a5a07233",
+ "components": {
+  "woow-emqx": {
+   "id": "woow-emqx",
+   "name": "Woow EMQX",
+   "version": "5.9.1",
+   "repository": "WOOWTECH/Woow_ha_emqx",
+   "source_sha": "6e827231fc794613c96e105055df96373defd55c",
+   "source_path": "emqx",
+   "config_file": "config.yaml",
+   "config_sha256": "sha256:09984699550b5417d02b0cfa4a8cc02ec82aee618e140d24bf2acb6db68a67d5",
+   "archive_sha256": "sha256:1aed41c43b26e831e7476cecd543fca1be78ce7aa20b33e2891a45ad3f1d1c70",
+   "context_fingerprint": "sha256:be92089276421a106e687b858a2eb6b390ca8d80208c32855f2cde5eb7bcd957",
+   "material_fingerprint": "sha256:ed14f7688113404ca6c4ee07d23643413300802f44c197c933150f4f6abb2c61",
+   "architectures": [
+    "aarch64",
+    "amd64"
+   ],
+   "source_build_supported": true,
+   "images": {},
+   "delivery": "local-source-build",
+   "validation": "manifest+source-context+configured-CI (runtime build not certified)",
+   "publisher_run_id": "38736411492",
+   "channel": "stable",
+   "store_path": "emqx"
+  },
+  "woow-n8n": {
+   "id": "woow-n8n",
+   "name": "Woow n8n",
+   "version": "2.43.6",
+   "repository": "WOOWTECH/Woow_ha_n8n",
+   "source_sha": "d20a13315958499789d3843e787e6cae86cf3a34",
+   "source_path": "n8n",
+   "config_file": "config.yaml",
+   "config_sha256": "sha256:3d444bc953be642dde9cd2a5a576a97eec5e09d015eff8ed13636da617a7bc17",
+   "archive_sha256": "sha256:14ae50e244ae3c6bc0bbc78524bcc469e5fbda6c60cb4f42362d50af80f365d4",
+   "context_fingerprint": "sha256:517a3c9cf7cc8452b68f213209e89580ccf4c36d549aed708b72000e728651df",
+   "material_fingerprint": "sha256:29478c538ff0d4ad8c5a9f1cdc2bb28d514327c5db33a3521ff1f1a6daf861db",
+   "architectures": [
+    "aarch64",
+    "amd64"
+   ],
+   "source_build_supported": true,
+   "images": {
+    "aarch64": {
+     "reference": "ghcr.io/woowtech/woow-ha-n8n-aarch64:2.43.6",
+     "index_digest": "sha256:56e60027f35f049480c7753c71996f532d4bb51e14f1d442bbaaee0b2546717d",
+     "digest": "sha256:ba91334bfe1f37f45a188b41076fa1bce65c03cfa3e8762b213fe9c113f009ee",
+     "source_revision": "d20a13315958499789d3843e787e6cae86cf3a34"
+    },
+    "amd64": {
+     "reference": "ghcr.io/woowtech/woow-ha-n8n-amd64:2.43.6",
+     "index_digest": "sha256:06408dc25cb8776954f7d82e927a4ba6bcfe7885f214931d94a55bf9ac3aad89",
+     "digest": "sha256:7620c441bbcd93651b56dd8ffc0d9776229a11d9688eefc586a92932a36a383d",
+     "source_revision": "d20a13315958499789d3843e787e6cae86cf3a34"
+    }
+   },
+   "delivery": "published-image",
+   "validation": "manifest+architecture-images+configured-CI",
+   "publisher_run_id": "38756639275",
+   "channel": "stable",
+   "store_path": "n8n"
+  }
+ }
+}

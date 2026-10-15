@@ -1,0 +1,112 @@
+apiVersion: v2
+name: emqx
+description: |
+  EMQX MQTT broker cloud service chart — one broker per tenant.
+
+  ⚠ LICENSE PIN — appVersion MUST stay on 5.8.x. EMQX 5.9.0 and later ship
+  under the Business Source License 1.1, which forbids offering EMQX to third
+  parties as a hosted / managed MQTT service (EMQ's FAQ names SaaS / PaaS
+  explicitly). This chart is exactly that. 5.8.x is the last Apache-2.0 line
+  (image label org.opencontainers.image.licenses: 5.8.9 = Apache-2.0 /
+  edition Opensource; 5.10.5 = BSL-1.1 / edition Enterprise). Do not bump past
+  5.8 without a commercial / OEM licence from EMQ. tests/ assert this.
+
+  Entrance: one port (18083) is the ONLY thing the platform exposes (ClusterIP
+  Service → subdomain → Cloudflare tunnel, HTTP/WS only). An in-pod nginx owns
+  it: /mqtt → the MQTT-over-WebSocket listener (wss://<subdomain>/mqtt), / →
+  the dashboard (moved to 18093 inside the pod). Raw MQTT TCP cannot cross the
+  tunnel: in-cluster clients (another service in the same workspace) dial the
+  ClusterIP on 1883/8083, and public TCP devices go through the tenant's own
+  ngrok agent sidecar (ngrok.enabled) — the same mechanism as the WOOWTECH HA
+  add-on (Woow_HA_App_Store/emqx), re-cut for k8s.
+
+  Credentials are FIRST-BOOT ONLY, by EMQX design:
+    * dashboard: `dashboard.default_password` "only takes effect on the first
+      boot; subsequent changes are ignored" (EMQX docs) and the dashboard forces
+      a change at first login → CloudAppTemplate MUST use
+      admin_password_carrier = app_managed (platform supplies the initial
+      password and shows it once; it can NOT reset it afterwards).
+  Anything that re-renders the Secret therefore changes nothing inside a broker
+  that has already booted. Do not advertise a reset path. MQTT users are not
+  seeded at all (0.1.3): the tenant creates them in the dashboard.
+
+  Anonymous access: EMQX 5 has no `allow_anonymous` (that was 4.x — the value
+  of the same name in WOOWTECH/Woow_k3s_emqx is a no-op). What actually decides
+  it is the authentication chain: an EMPTY chain accepts every client. This
+  chart therefore configures a built_in_database authenticator by default
+  (mqtt.denyAnonymous=true), with no users until the tenant adds them.
+
+  Authorization (0.1.6, #1529): default DENY. Each MQTT user may only use the
+  topics under its own username (<username>/#); a hub that must see every
+  device is made "Is Superuser" in the dashboard, anything else is an ACL
+  rule the tenant adds. Shipped as etc/base.hocon + etc/acl.conf defaults, so
+  the tenant's own dashboard changes (kept in data/configs/cluster.hocon)
+  always win. No client address is privileged, and none can pass for
+  127.0.0.1: see values.yaml entrance / ngrok.proxyProtocol.
+
+  Derived from WOOWTECH/Woow_k3s_emqx (chart 2.1.0, single-instance: fixed
+  resource names, NodePort 31883/31808, namespace self-created, local-path,
+  resource-policy keep) and re-cut to the PaaS contract: release-prefixed
+  names, ClusterIP only, platform-injected storageClass and pull secret,
+  no namespace object, no keep policy (the platform owns PVC retention),
+  non-root, default-deny NetworkPolicy.
+  Deployed per-tenant by paas-operator as svc-{ref[:8]} into a paas-ws-* namespace.
+type: application
+# 0.1.0 = first PaaS cut (ngrok 3.39.11 sidecar) — wrongly on EMQX 5.10.5 (BSL).
+# 0.1.1 = back on EMQX 5.8.9 (Apache-2.0); see the licence pin above. The ngrok
+#         sidecar supervises the agent (a bad token no longer takes the broker
+#         out of its Service) and retracts the address when the agent is down.
+# 0.1.2 = the tenant's ngrok token moved to ngrok.authtoken: 0.1.1 read it from
+#         config.sensitive.ngrok_authtoken, a subtree woow_paas_platform strips
+#         from tenant input, so the token never reached helm and the render-time
+#         guard failed the upgrade (prod 2026-10-03, uid（測試帳號已移除） test service). The
+#         guard is gone too: enabled-without-token now idles the sidecar.
+# 0.1.3 = round-6 internal test fixes (prod 2026-10-03, uid（測試帳號已移除）):
+#         #1361 no seeded superuser `woow` (its password only ever lived in the
+#               Secret); #1362 retained messages on disc (durable sessions
+#               evaluated and NOT offered — see values.yaml); #1366 nginx
+#               entrance on 18083 so
+#               wss://<subdomain>/mqtt reaches the WS listener (X-Forwarded-For
+#               replaced with CF-Connecting-IP — never 127.0.0.1 to EMQX).
+# 0.1.4 = #1418: the dashboard's WebSocket client defaulted to port 8084 on an
+#         https page and never connected (the tunnel carries 443 only); the
+#         entrance rewrites that default to the page's own port (prod
+#         2026-10-04, uid（測試帳號已移除） regression run).
+# 0.1.5 = workspace = LAN (#1441): same-namespace ingress / egress on every port.
+# 0.1.6 = #1529 (security audit 2026-10-07): MQTT authorization defaults to
+#         deny — no_match = deny and a default ACL that only lets each MQTT
+#         user use <username>/# (was EMQX's stock allow-all: `+/+/#` read
+#         every device, publish anywhere, 127.0.0.1 got "#" and "$SYS/#"), as
+#         base.hocon / acl.conf DEFAULTS the dashboard can still change; no
+#         client can look like 127.0.0.1 any more (ngrok → loopback listener
+#         with PROXY protocol v2, /mqtt → loopback WS listener that alone
+#         trusts the entrance's X-Forwarded-For, 8083 trusts no header, the
+#         entrance only believes a public CF-Connecting-IP); the public URL
+#         404s /api/v5/prometheus/*, /api-docs, /status, /api/v5/status and
+#         Prometheus scraping needs an API key.
+# 0.1.7 = #1613 (security): the ngrok agent echoes the authtoken back on every
+#         authentication failure (`Your authtoken: <token>`, ERR_NGROK_105 for any
+#         malformed token — measured with 3.39.11) and the sidecar ran it with
+#         `--log stdout` straight into the container log. Its output now passes
+#         through ngrok-redact.awk (shared/ngrok-redact, the same filter
+#         charts/headscale uses) and is dropped when the filter is missing; a
+#         token with a line break never reaches the agent. The ERR_NGROK_<n> line
+#         the platform reads (#1559) is untouched. The sidecar script moved to
+#         files/ngrok.sh (ConfigMap <release>-emqx-ngrok): ngrok.remoteAddr now
+#         arrives through the environment and is validated (host:port) — 0.1.6
+#         templated it into the shell command line, so `x; <command>` ran in the
+#         sidecar. The token is trimmed; the agent logs at warn level.
+# 0.1.8 = woow_paas_platform #1637（容量研究，使用者 2026-10-10 核可）: the startupProbe gets
+#         timeoutSeconds 3 (it had none = the Kubernetes default 1 s, while readiness already
+#         had 3 s). Mnesia replay on a busy node can answer /status slower than 1 s.
+version: 0.1.8
+appVersion: "5.8.9"
+kubeVersion: ">=1.24.0-0"
+keywords: [paas, emqx, mqtt, iot, broker, cloud-service]
+maintainers:
+  - name: WOOW PaaS Team
+home: https://git-prod.woowtech.io/woow-paas/woow-paas-charts
+sources:
+  - https://git-prod.woowtech.io/woow-paas/woow-paas-charts
+  - https://github.com/WOOWTECH/Woow_k3s_emqx
+  - https://github.com/emqx/emqx
