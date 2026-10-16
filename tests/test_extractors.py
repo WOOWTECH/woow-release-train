@@ -87,6 +87,15 @@ class CatalogAndCdTest(unittest.TestCase):
     def test_cd_addon_ref_missing(self):
         self.assertIsNone(wvt.extract_addon_ref("image:\n  tag: x\n")["tag"])
 
+    def test_addon_ref_newest_note_wins(self):
+        # 10-16: the .243 note was prepended above an older "Built from addon_ref v18.0.1.0.242" line
+        text = ("# ── image ──\n# 243: v18.0.1.0.243 / source 4454a9a7; approval CI#347\n"
+                "# Built from addon_ref v18.0.1.0.242; human approval CI#343\n"
+                "image:\n  tag: \"20261016.0331\"\n  digest: \"sha256:a978\"\n")
+        info = wvt.extract_addon_ref(text)
+        self.assertEqual(info["tag"], "v18.0.1.0.243")
+        self.assertEqual(info["image_tag"], "20261016.0331")
+
 
 class ImageRefTest(unittest.TestCase):
     def test_forms(self):
