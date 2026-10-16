@@ -326,7 +326,7 @@ observations:
   - product: n8n
     as_of: "2026-10-16"
     source: "kubectl get deploy（pi-agent，唯讀）"
-    summary: "4 個 PaaS 服務：2 個跑 2.35.3（amd64 a3693cff，低於下限 2.38.0，同一工作區）；2 個跑 2.38.0（e0e7b603）"
+    summary: "3 個 PaaS 服務全部跑 2.43.6（amd64 371dd463，JCR 20261015.2215）＝ seed；10-16 平台 .243 上線後逐台備份＋Redeploy（測試服務已刪）"
   - product: emqx
     as_of: "2026-10-16"
     source: "kubectl get deploy（pi-agent，唯讀）"
