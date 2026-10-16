@@ -1258,13 +1258,15 @@ def extract_addon_ref(values_text: str):
 
     The pinned image is structured (image.tag/digest) but the platform release it
     was built from is only recorded in the comment above it ("Built from addon_ref
-    v18.0.1.0.242"). Take the first such mention in the '── image ──' block.
+    v18.0.1.0.242"). Take the first (topmost = newest) platform tag mentioned in the
+    '── image ──' block: release notes are prepended, so an older "addon_ref v…" line
+    further down must not win over a newer "243: v18.0.1.0.243" line above it.
     """
     lines = values_text.splitlines()
     start = next((i for i, ln in enumerate(lines) if "── image ──" in ln), 0)
     end = next((i for i, ln in enumerate(lines) if i > start and re.match(r"^image:", ln)), len(lines))
     block = "\n".join(lines[start:end])
-    m = re.search(r"addon_ref[ =:]+(v\d+(?:\.\d+)+)", block) or re.search(r"\b(v18\.0\.\d+\.\d+\.\d+)\b", block)
+    m = re.search(r"\b(v\d+\.0\.\d+\.\d+\.\d+)\b", block)
     tag = m.group(1) if m else None
     img = {}
     for ln in lines[end + 1: end + 12]:
