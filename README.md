@@ -4,7 +4,7 @@
 
 - **主 repo**：Gitea `woow-paas/woow-release-train`（https://git-prod.woowtech.io/woow-paas/woow-release-train）
 - **公開鏡像**：GitHub `WOOWTECH/woow-release-train`，唯讀，由 Gitea Actions 單向推送。GitHub 端不要直接改，下次鏡像會覆蓋。
-- **目前階段**：第 1 期（2026-10-24 起）。HA 與 PaaS 的 CI 都跑 `wvt check`，**只有各產品的硬規則會擋，其他只警告**。
+- **目前階段**：第 1 期（2026-10-24 起）。HA 與 PaaS 的 CI 都跑 `wvt check`，**只有各產品的硬規則會擋，其他只警告**。第 2 期機器人（`tools/wvtbot.py`）已就緒：propose 開清冊 PR，兩個 fanout 先 dry-run。
 
 ## 為什麼要有這個 repo
 
@@ -132,6 +132,7 @@ python3 -m unittest discover -s tests -v
 | `drift.yml` | 每天台北 08:41、手動 | 跑 `wvt drift`，維護**一張**帶 `version-drift` label 的 issue：有漂移就建立或更新，沒有就留言後關閉 |
 | `mirror-github.yml` | push main／tag、每天、手動 | 用 deploy key（repo secret `GH_MIRROR_DEPLOY_KEY`）把 main 和 tag 推到 GitHub |
 | `.github/workflows/wvt-check.yml` | 只在 GitHub（`workflow_call`） | HA repo 呼叫的可重用檢查。Gitea 有 `.gitea/workflows` 就不讀 `.github/workflows`，所以它只在鏡像上被使用 |
+| `bots.yml` | 每天台北 09:11、清冊合併到 main、手動 | 第 2 期機器人 propose／fanout，做什麼照清冊 `bots:`；結果寫在執行摘要 |
 
 權杖：
 
@@ -199,6 +200,39 @@ jobs:
 
 順序：先合併本 repo 的 PR（鏡像推到 GitHub 後 HA 端才呼叫得到可重用 workflow），再合併各邊的接線 PR；Store 的 `required_workflows` 最後才加，否則沒有檢查紀錄的新版本會被擋。
 
+## 第 2 期：機器人開 PR
+
+雙向同步不是兩邊互抄版本：某一邊先升，機器人把它寫回清冊（propose）；清冊合併後，機器人再到還沒跟上的那一邊開 PR（fanout）。兩個動作只看「比清冊新」與「比清冊舊／不等於清冊」的邊，所以不會互相觸發成迴圈。所有 PR 都由人合併。
+
+| 機器人 | 做什麼 | 權杖 | 誰合併 |
+|---|---|---|---|
+| `propose` | 某一邊的預設分支（HA main、charts／paas-odoo-ci main、平台 develop）比清冊新 → 到 registry 查該版的 index 與各架構 digest（EMQX 另取官方 tarball 的 `.sha256`）→ 開清冊 PR，舊目標移到 `known_versions`。共用檔來源先改 → 換 commit＋blobs，並把共用檔 import 的同目錄模組一起列入共用清單 | `GITEA_TOKEN`（本 repo） | 版本負責人 |
+| `fanout_ha` | 清冊比 HA 新 → 每個 HA repo 一張 PR：改 Dockerfile ARG／lock 檔、add-on 版號（`bump` 規則）、CHANGELOG 加一行待改的說明、LiteLLM 共用檔複本＋lock | GitHub App（`WVT_GH_APP_ID`、`WVT_GH_APP_PRIVATE_KEY`） | HA 維護者 |
+| `fanout_paas` | 清冊比 PaaS 新 → 先找 paas-odoo-ci 的 mirror-image 核可單（沒有就 dispatch，等人 `/approve`）；放行後改 seed／charts／paas-odoo-ci | `WVT_GITEA_BOT_TOKEN` | Eugene、Elmo |
+
+- **模式在清冊**：`bots.<名稱>` 是 `off`、`dry-run`（只在執行摘要列計畫）或 `open-pr`。改模式也是清冊 PR。
+- **一個產品、一個 repo、一個分支**：`wvt/propose-<產品>`、`wvt/fanout-<產品>`。重跑只更新同一張 PR；內容沒變就不推；那一邊對齊後，機器人關掉自己的 PR。
+- **被關掉的提案不重開**：版本負責人關掉（不合併）的同一個提案不會再開。要重提，手動執行 `bots.yml` 並填 `product`、`version`。
+- **安全邊界**：不提超過授權上限的版本；某一邊釘的 digest 跟 registry 查到的不同就不提案；禁止降版的產品不往下提；鏡像核可單被拒或逾時不自動重送。
+- **PR 只是起點**：機器人只改清冊知道的釘點。文件、測試、遷移說明由各 repo 的 CI 與審核者補齊；資料遷移單向的產品（n8n）PR 內文要求附升級證據。
+
+```sh
+GITEA_READ_TOKEN=… python3 tools/wvtbot.py --mode dry-run          # 本機看三個機器人的計畫
+python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode dry-run   # 先改清冊的手動升版
+```
+
+第 2 期用到的清冊欄位：
+
+| 欄位 | 用途 |
+|---|---|
+| `upstream.image_tag` | 版本對應的映像 tag，預設 `{version}`（Hermes 用 `v{version}`） |
+| `upstream.artifact_sha256.<名稱>` | 非映像產物（例如 EMQX tarball）的 `.sha256` 網址，含 `{version}` |
+| `package_version[].bump` | fanout 時包裝版號怎麼變：`same`＝等於上游版本、`patch`＝+0.0.1、`none`（預設）＝不動 |
+| `legs.<邊>.fanout.changelog` | 要加一行的 CHANGELOG；`changelog_entry`／`changelog_shared` 改寫那一行的文字 |
+| `legs.paas.mirror` | `{dest_name, digest}`：PaaS 釘的是 JCR 鏡像時，fanout 先 dispatch mirror-image |
+| 釘點 `mirror: true` | 這個釘點指向 JCR，新值要等鏡像 |
+| 釘點 `write: "{jcr_tag}"` | 只列參考的釘點（例如 chart 的 JCR tag），其他釘點要改時一起改成這個值 |
+
 ## 新增一個產品
 
 1. 用 `crane manifest <image>:<version>` 取得 index 與各架構 digest，寫進 `target`，並在 `verified` 註明日期與指令。
@@ -214,7 +248,7 @@ jobs:
 |---|---|---|
 | **0**（10-16 上線） | 清冊列 EMQX、LiteLLM、n8n 的現況；drift 報告＋追蹤 issue；GitHub 鏡像 | 什麼都不擋（只擋本 repo 自己的 CI） |
 | **1（現在）** | 各邊 CI 跑 `wvt check`（HA：各 repo 的 `release-train.yml` 呼叫可重用 workflow，Store 以 `required_workflows` 把關；PaaS：charts、woow_paas_platform、paas-odoo-ci 各一支） | 只開兩條硬規則：**EMQX 授權上限**；**LiteLLM base digest＋外掛 lock commit／blob（含複本內容）必須等於清冊**。讀不到釘點一律擋。其他一律警告 |
-| **2** | 機器人：監看上游、開清冊 PR、扇出各邊 PR、dispatch mirror-image、開 seed PR | 不擋；只產生 PR |
+| **2** | 機器人：某一邊先升 → 清冊 PR；清冊合併 → 扇出各邊 PR、dispatch mirror-image、開 seed／charts PR（`tools/wvtbot.py`） | 不擋；只產生 PR |
 | **3** | 擴大到 OpenDesign、code-server（lockstep），Hermes、Omnigent、Headscale、Tailscale（range），以及 pi-agent、Nextcloud、Odoo、MCP | range 的落後天數改成硬擋，配 SLA |
 
 ## 誰核可什麼

@@ -52,6 +52,10 @@ REPO_RE = re.compile(r"^(github|gitea):[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 HARD_RULES = ("license_ceiling", "min_version", "digest", "shared_files", "exception_expired")
 # manifest `enforcement` -> what `check --fail-on auto` fails on
 ENFORCEMENT = {"report-only": "none", "hard-rules": "violation", "strict": "drift"}
+# phase 2 bots (tools/wvtbot.py); their modes live in the manifest's `bots:`
+BOTS = ("propose", "fanout_ha", "fanout_paas")
+BOT_MODES = ("off", "dry-run", "open-pr")
+PACKAGE_BUMPS = ("none", "same", "patch")
 EXPIRY_WARN_DAYS = 14
 TRACKING_MARKER = "<!-- wvt:drift-tracking -->"
 TAIPEI = _dt.timezone(_dt.timedelta(hours=8))  # day boundaries for expiry / days-behind
@@ -963,6 +967,31 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
             for s in ex.get("waives") or []:
                 if s not in ("behind", "ahead", "mismatch"):
                     E("%s: waives may only list behind/ahead/mismatch" % ew)
+    for b, mode in (m.get("bots") or {}).items():
+        if b not in BOTS:
+            E("bots.%s: unknown bot (one of %s)" % (b, ", ".join(BOTS)))
+        elif mode not in BOT_MODES:
+            E("bots.%s must be one of %s" % (b, ", ".join(BOT_MODES)))
+    for pname, p in prods.items():
+        if not isinstance(p, dict):
+            continue
+        for name, url in ((p.get("upstream") or {}).get("artifact_sha256") or {}).items():
+            if not str(url).startswith("https://") or "{version}" not in str(url):
+                E("products.%s.upstream.artifact_sha256.%s must be an https URL containing {version}" % (pname, name))
+        for leg, legd in (p.get("legs") or {}).items():
+            where = "products.%s.legs.%s" % (pname, leg)
+            mir = legd.get("mirror")
+            if mir is not None and (not mir.get("dest_name") or target_value(p, str(mir.get("digest") or "")) is None
+                                    or str(mir.get("digest")) == "version"):
+                E("%s.mirror needs dest_name and a target digest (index_digest or platforms.<arch>)" % where)
+            pkgs = legd.get("package_version") or []
+            for pkg in ([pkgs] if isinstance(pkgs, dict) else pkgs):
+                if pkg.get("bump", "none") not in PACKAGE_BUMPS:
+                    E("%s.package_version[%s].bump must be one of %s" % (where, pkg.get("label"), ", ".join(PACKAGE_BUMPS)))
+            for pin in iter_pins(p, leg):
+                w = pin.get("write")
+                if w is not None and (not isinstance(w, str) or re.sub(r"\{(version|jcr_tag|digest)\}", "", w).count("{")):
+                    E("%s.pins[%s].write may only use {version}, {jcr_tag}, {digest}" % (where, pin.get("id")))
     obs = m.get("observations") or []
     for o in obs:
         if not (isinstance(o.get("as_of"), str) and DATE_RE.match(o["as_of"])):
@@ -1549,7 +1578,8 @@ def collect_drift(m: dict, f: Fetcher, today: _dt.date | None = None) -> dict:
                     rref = resolve_ref(ref, ctx)
                     point = _point_label(pin, ref, rref)
                     row = {"product": pname, "leg": leg, "pin": pin["id"], "file": pin["file"], "repo": pin["repo"],
-                           "ref": rref, "point": point, "compare": pin.get("compare", "version")}
+                           "ref": rref, "point": point, "compare": pin.get("compare", "version"),
+                           "source": "prod" if str(ref).startswith("$") else "branch"}
                     if rref is None:
                         row.update(status="unreachable", version=None, observed=None,
                                    findings=[finding("unreachable", "fetch", "無法解析 %s" % ref)])
@@ -1638,7 +1668,7 @@ def _published_rows(p, pname, leg, legd, pub, f, today, catalogs):
             continue
         row = {"product": pname, "leg": leg, "pin": pin["id"], "file": pin["file"], "repo": pin["repo"],
                "ref": sha, "point": "%s（Store 已發佈 %s @%s）" % (pin.get("label") or pin["id"], comp["version"], sha[:7]),
-               "compare": pin.get("compare", "version")}
+               "compare": pin.get("compare", "version"), "source": "published"}
         rows.append(_observe_remote(None, p, leg, pin, sha, f, today, row))
     return rows
 

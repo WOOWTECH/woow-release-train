@@ -37,6 +37,13 @@ sources:
 probes:
   api.github.com: https://api.github.com/rate_limit
 
+# 第 2 期機器人（tools/wvtbot.py，.gitea/workflows/bots.yml）。off＝不做；dry-run＝只在 Actions 摘要列計畫；
+# open-pr＝推機器人分支、開／更新／關閉 PR。機器人永遠不合併、不簽 /approve；改這裡也要開 PR、人工合併。
+bots:
+  propose: open-pr        # 某一邊比清冊新 → 本 repo 的清冊 PR（版本負責人合併）
+  fanout_ha: dry-run      # 清冊比 HA 新 → HA repo PR；GitHub App（WVT_GH_APP_ID／WVT_GH_APP_PRIVATE_KEY）建好後改 open-pr
+  fanout_paas: dry-run    # 清冊比 PaaS 新 → mirror-image（人工 /approve）＋PaaS PR；Gitea 機器人帳號定案後改 open-pr
+
 products:
 
   # ------------------------------------------------------------------ EMQX
@@ -45,6 +52,9 @@ products:
     upstream:
       image: docker.io/emqx/emqx
       source: "github:emqx/emqx"
+      artifact_sha256:   # HA 自建用的官方 tarball；propose 從這裡取新版的 sha256
+        debian13-amd64: "https://github.com/emqx/emqx/releases/download/v{version}/emqx-{version}-debian13-amd64.tar.gz.sha256"
+        debian13-arm64: "https://github.com/emqx/emqx/releases/download/v{version}/emqx-{version}-debian13-arm64.tar.gz.sha256"
     policy:
       mode: lockstep
       license_ceiling: "<5.9.0"   # 5.9+ 是 BSL-1.1（woow-paas-charts charts/emqx/Chart.yaml 描述）
@@ -93,7 +103,10 @@ products:
             file: emqx/config.yaml
             kind: yaml
             path: version
+            bump: patch          # fanout：上游換版時 add-on +0.0.1（5.9.1 包 5.8.9，不跟上游同號）
             note: "add-on 版號 ≠ 上游版號（5.9.1 包 5.8.9；Store 拒絕降版）；授權上限只看上游"
+        fanout:
+          changelog: emqx/CHANGELOG.md
         published:
           kind: catalog
           repo: "github:WOOWTECH/Woow_HA_App_Store"
@@ -118,6 +131,9 @@ products:
             kind: yaml
             path: appVersion
             compare: version
+        mirror:                  # seed 釘 JCR 的 tag@amd64 digest：fanout 先 dispatch mirror-image
+          dest_name: emqx
+          digest: platforms.amd64
         package_version:
           - label: seed chart 版號
             repo: "gitea:odoo-addons/woow_paas_platform"
@@ -133,6 +149,7 @@ products:
             file: charts/emqx/Chart.yaml
             kind: yaml
             path: version
+            bump: patch
     exceptions: []
 
   # --------------------------------------------------------------- LiteLLM
@@ -187,12 +204,37 @@ products:
             name: LITELLM_IMAGE
             parse: image_ref
             compare: index_digest
+          # Dockerfile 的每個釘點都必須等於 upstream.lock.json（HA repo tests/test_config_contract.py）
+          - id: lock-tag
+            label: upstream.lock.json tag
+            file: litellm/upstream.lock.json
+            kind: json
+            path: tag
+            compare: version
+          - id: lock-version
+            label: upstream.lock.json litellm_version
+            file: litellm/upstream.lock.json
+            kind: json
+            path: litellm_version
+            compare: version
+          - id: lock-index
+            label: upstream.lock.json index_digest
+            file: litellm/upstream.lock.json
+            kind: json
+            path: index_digest
+            parse: digest
+            compare: index_digest
         package_version:
           - label: add-on 版號
             file: litellm/config.yaml
             kind: yaml
             path: version
+            bump: patch
             note: "私人映像，只裝公司 HA，不在 Store catalog"
+        fanout:
+          changelog: litellm/CHANGELOG.md
+          changelog_entry: "- 上游 {name} {old} → {new}（woow release train 清冊）。合併前請改成實際變更說明。"
+          changelog_shared: "- Woow 外掛同步到 woow-paas-charts {commit}（woow release train 清冊）。合併前請改成實際變更說明。"
       paas:
         pins:
           - id: ci-base
@@ -213,6 +255,16 @@ products:
             path: image.digest
             parse: digest
             compare: index_digest
+            mirror: true           # values 指向 JCR：新 digest 要先鏡像
+          - id: chart-tag
+            label: chart values JCR tag（fanout 一起改）
+            repo: "gitea:woow-paas/woow-paas-charts"
+            ref: main
+            file: charts/litellm/values.yaml
+            kind: yaml
+            path: image.tag
+            compare: info
+            write: "{jcr_tag}"
           - id: chart
             label: chart appVersion
             repo: "gitea:woow-paas/woow-paas-charts"
@@ -245,6 +297,10 @@ products:
             file: charts/litellm/Chart.yaml
             kind: yaml
             path: version
+            bump: patch
+        mirror:
+          dest_name: litellm
+          digest: index_digest
     exceptions:
       - leg: ha
         what: "ChatGPT Responses 相容修補（Woow_ha_litellm UPSTREAM.md）"
@@ -302,6 +358,14 @@ products:
             file: n8n/config.yaml
             kind: yaml
             path: version
+            bump: same           # n8n add-on 版號＝上游版號
+          - label: 建置版號（BUILD_VERSION）
+            file: n8n/Dockerfile
+            kind: dockerfile_arg
+            name: BUILD_VERSION
+            bump: same
+        fanout:
+          changelog: n8n/CHANGELOG.md
         published:
           kind: catalog
           repo: "github:WOOWTECH/Woow_HA_App_Store"
@@ -318,6 +382,9 @@ products:
             kind: seed_image
             record: cloud_app_n8n
             compare: platforms.amd64
+        mirror:
+          dest_name: n8n
+          digest: platforms.amd64
         package_version:
           - label: 外部 chart（8gears）版號
             repo: "gitea:odoo-addons/woow_paas_platform"

@@ -1,0 +1,59 @@
+name: Bots
+
+# 第 2 期機器人（tools/wvtbot.py）：
+#   propose  某一邊比清冊新（或共用檔來源先改）→ registry 實查 digest → 本 repo 的清冊 PR
+#   fanout   清冊比某一邊新 → 那一邊每個 repo 一張 PR（PaaS 先 dispatch mirror-image，人工 /approve）
+# 每個機器人做什麼由清冊的 bots: 決定（off／dry-run／open-pr），這支 workflow 不帶判準；
+# 結果寫在本次執行的摘要。機器人永遠不合併 PR、不簽 /approve。
+#
+# 權杖只經 env 傳給 wvtbot（不寫檔、不印出）：
+#   GITEA_READ_TOKEN      org secret CI_GITEA_TOKEN：讀各 repo（CD、charts 是私人 repo）與鏡像核可單
+#   GITEA_TOKEN           本次執行自動發的 token：在本 repo 推 wvt/propose-* 分支、開清冊 PR
+#   WVT_GITEA_BOT_TOKEN   （fanout_paas）在 charts／平台／paas-odoo-ci 開 PR、dispatch mirror-image；有設時清冊 PR 也用它
+#   WVT_GH_APP_ID、WVT_GH_APP_PRIVATE_KEY  （fanout_ha）GitHub App，只裝在 HA add-on repo
+on:
+  schedule:
+    - cron: "11 1 * * *"   # 台北 09:11，在 drift（08:41）之後
+  push:
+    branches: [main]
+    paths: [woow-versions.yaml]   # 清冊一合併就 fanout
+  workflow_dispatch:
+    inputs:
+      bot:
+        description: "all／propose／fanout_ha／fanout_paas"
+        default: all
+      product:
+        description: "只處理這個產品（留空＝全部）"
+        default: ""
+      version:
+        description: "propose：把 product 提到這個上游版本（先改清冊的手動升版）"
+        default: ""
+
+concurrency:
+  group: wvt-bots
+  cancel-in-progress: false
+
+jobs:
+  bots:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Run bots
+        env:
+          GITEA_API_URL: http://gitea-http.gitea.svc.cluster.local:3000/api/v1
+          GITEA_GIT_URL: http://gitea-http.gitea.svc.cluster.local:3000
+          GITEA_READ_TOKEN: ${{ secrets.CI_GITEA_TOKEN }}
+          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          WVT_GITEA_BOT_TOKEN: ${{ secrets.WVT_GITEA_BOT_TOKEN }}
+          WVT_GH_APP_ID: ${{ secrets.WVT_GH_APP_ID }}
+          WVT_GH_APP_PRIVATE_KEY: ${{ secrets.WVT_GH_APP_PRIVATE_KEY }}
+          BOT: ${{ inputs.bot || 'all' }}
+          PRODUCT: ${{ inputs.product }}
+          VERSION: ${{ inputs.version }}
+        run: python3 tools/wvtbot.py --bot "${BOT}" --product "${PRODUCT}" --version "${VERSION}"

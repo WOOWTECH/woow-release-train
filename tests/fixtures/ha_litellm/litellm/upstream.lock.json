@@ -1,0 +1,11 @@
+{
+  "_comment": "trimmed test fixture of Woow_ha_litellm litellm/upstream.lock.json",
+  "image": "ghcr.io/berriai/litellm-non_root",
+  "tag": "1.104.0",
+  "litellm_version": "1.104.0",
+  "litellm_commit": "79645770fedc7ec2627e6468d31062f20f82aecc",
+  "index_digest": "sha256:37066242e6b8327fdd627682a66a9ae2a599553b4d5a84c905c6d8b9eb35c01e",
+  "platforms": [
+    "linux/amd64"
+  ]
+}
