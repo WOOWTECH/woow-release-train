@@ -1,0 +1,53 @@
+# Reusable release-train check for the WOOWTECH HA add-on repositories (GitHub only).
+#
+# The primary repository is Gitea woow-paas/woow-release-train; this file reaches
+# GitHub through the one-way mirror WOOWTECH/woow-release-train. Gitea Actions never
+# runs it: a repository with .gitea/workflows has its .github/workflows ignored.
+#
+# Each HA repository calls it from .github/workflows/release-train.yml (README
+# 「第 1 期：兩邊怎麼接」):
+#
+#   jobs:
+#     check:
+#       name: Release train
+#       uses: WOOWTECH/woow-release-train/.github/workflows/wvt-check.yml@main
+#
+# It compares the caller's version pins with the manifest on main, offline: no Gitea,
+# no JCR, no secrets beyond the caller's read-only GITHUB_TOKEN for the checkout. What
+# fails is decided by the manifest's `enforcement` (phase 1: only the products' hard
+# rules); every other finding is a warning annotation. The Woow HA App Store lists
+# release-train.yml in the caller's required_workflows, so a release whose check failed
+# is not published.
+name: Release train check (reusable)
+'on':
+  workflow_call:
+    inputs:
+      leg:
+        description: Manifest leg of the calling repository.
+        type: string
+        default: ha
+jobs:
+  wvt:
+    name: wvt check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      with:
+        path: source
+        persist-credentials: false
+    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      with:
+        repository: WOOWTECH/woow-release-train
+        ref: main
+        path: release-train
+        persist-credentials: false
+    - name: wvt check
+      env:
+        LEG: ${{ inputs.leg }}
+        REPO: github:${{ github.repository }}
+      run: |
+        git -C release-train log -1 --format='manifest %h %s'
+        python3 release-train/tools/wvt.py check --leg "$LEG" --repo "$REPO" --repo-dir source

@@ -12,8 +12,11 @@ Commands
              markdown report (product x leg x observation point)
   issue      create / update / close the single tracking issue on Gitea
 
-Phase 0 is report-only: ``check`` and ``drift`` exit 0 whatever they find,
-unless ``--fail-on`` (or ``--strict``) asks otherwise.
+``check`` fails according to the manifest's ``enforcement`` (report-only: never;
+hard-rules: only on a product's hard rules, from phase 1; strict: on any drift),
+unless ``--fail-on`` (or ``--strict``) overrides it. Both legs' CI hooks call
+``check`` without ``--fail-on``, so one manifest PR moves every gate at once.
+``drift`` exits 0 whatever it finds unless asked otherwise.
 
 Only Python 3 standard library is used, so the tool runs on any runner image.
 The manifest is YAML restricted to a small subset (block mappings, block
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import hashlib
 import json
 import os
 import re
@@ -46,6 +50,8 @@ SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 REPO_RE = re.compile(r"^(github|gitea):[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 HARD_RULES = ("license_ceiling", "min_version", "digest", "shared_files", "exception_expired")
+# manifest `enforcement` -> what `check --fail-on auto` fails on
+ENFORCEMENT = {"report-only": "none", "hard-rules": "violation", "strict": "drift"}
 EXPIRY_WARN_DAYS = 14
 TRACKING_MARKER = "<!-- wvt:drift-tracking -->"
 TAIPEI = _dt.timezone(_dt.timedelta(hours=8))  # day boundaries for expiry / days-behind
@@ -562,6 +568,11 @@ def short(d, n=12):
     return d[7: 7 + n] if d.startswith("sha256:") else d[:n]
 
 
+def git_blob_sha(data: bytes) -> str:
+    """``git hash-object`` of a file's bytes (no clean filters)."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
 def dig(obj, path: str):
     cur = obj
     for seg in path.split("."):
@@ -757,8 +768,13 @@ def _days_between(a: str, b: _dt.date) -> int:
     return (b - _dt.date.fromisoformat(a)).days
 
 
-def validate_manifest(m: dict, today: _dt.date | None = None):
-    """Return (errors, warnings)."""
+def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = True):
+    """Return (errors, warnings).
+
+    expiry=False (used by ``check``) does not turn an expired exception into a manifest
+    error: the expiry then fails only that product's check (rule exception_expired), not
+    every other product's CI.
+    """
     today = today or _dt.datetime.now(TAIPEI).date()
     errors, warnings = [], []
     E, W = errors.append, warnings.append
@@ -768,6 +784,13 @@ def validate_manifest(m: dict, today: _dt.date | None = None):
         E("schema must be %d (got %r)" % (SCHEMA_VERSION, m.get("schema")))
     if not isinstance(m.get("phase"), int) or m.get("phase") not in (0, 1, 2, 3):
         E("phase must be one of 0..3")
+    enf = m.get("enforcement")
+    if enf not in ENFORCEMENT:
+        E("enforcement must be one of %s" % ", ".join(ENFORCEMENT))
+    elif m.get("phase") == 0 and enf != "report-only":
+        E("phase 0 is report-only (enforcement: report-only)")
+    elif enf == "report-only" and m.get("phase") in (1, 2, 3):
+        W("enforcement is report-only in phase %s: no CI gate fails" % m["phase"])
     srcs = m.get("sources") or {}
     for name, s in srcs.items():
         if not REPO_RE.match(str(s.get("repo", ""))):
@@ -899,6 +922,24 @@ def validate_manifest(m: dict, today: _dt.date | None = None):
                 E("%s.shared_files.source.commit must be a full 40-hex sha" % where)
             if not src.get("files"):
                 E("%s.shared_files.source.files must list the shared files" % where)
+            if src.get("leg") is not None and src["leg"] not in LEGS:
+                E("%s.shared_files.source.leg must be one of %s" % (where, "/".join(LEGS)))
+            if not src.get("path"):
+                E("%s.shared_files.source.path missing" % where)
+            blobs = src.get("blobs")
+            if blobs is not None:
+                if not isinstance(blobs, dict) or set(blobs) != set(src.get("files") or []):
+                    E("%s.shared_files.source.blobs must list exactly the shared files" % where)
+                elif not all(SHA1_RE.match(str(b)) for b in blobs.values()):
+                    E("%s.shared_files.source.blobs must be 40-hex git blob shas" % where)
+            for kc in sf.get("known_commits") or []:
+                if not SHA1_RE.match(str(kc.get("commit") or "")):
+                    E("%s.shared_files.known_commits: commit must be a full 40-hex sha" % where)
+                elif kc["commit"] == src.get("commit"):
+                    E("%s.shared_files.known_commits duplicates the current commit" % where)
+                kb = kc.get("blobs")
+                if kb is not None and (not isinstance(kb, dict) or not all(SHA1_RE.match(str(b)) for b in kb.values())):
+                    E("%s.shared_files.known_commits[%s].blobs must map file -> 40-hex blob" % (where, short(kc.get("commit"), 10)))
             for c in sf.get("consumers") or []:
                 if c.get("leg") not in LEGS or not REPO_RE.match(str(c.get("repo") or "")) or not c.get("lock"):
                     E("%s.shared_files.consumers entry needs leg/repo/lock" % where)
@@ -915,7 +956,8 @@ def validate_manifest(m: dict, today: _dt.date | None = None):
                 continue
             left = -_days_between(exp, today)
             if left < 0:
-                E("%s: expired on %s — renew with a reason or remove the exception" % (ew, exp))
+                if expiry:
+                    E("%s: expired on %s — renew with a reason or remove the exception" % (ew, exp))
             elif left <= EXPIRY_WARN_DAYS:
                 W("%s: expires in %d days (%s)" % (ew, left, exp))
             for s in ex.get("waives") or []:
@@ -1054,6 +1096,19 @@ def is_hard(product: dict, f: dict) -> bool:
     return f.get("rule") in ((product.get("policy") or {}).get("hard_rules") or [])
 
 
+def blocking(product: dict, f: dict, fail_on: str) -> bool:
+    """Does finding f fail ``check`` under fail_on (none / violation / drift)?"""
+    if fail_on == "drift":
+        return f["status"] in DRIFT_STATUSES
+    if fail_on != "violation":
+        return False
+    rules = (product.get("policy") or {}).get("hard_rules") or []
+    if f.get("rule") in rules:
+        return f["status"] in ("violation", "mismatch")
+    # fail closed: a pin that cannot be read leaves the product's hard rules unverified
+    return bool(rules) and f.get("rule") == "extract" and f["status"] == "unknown"
+
+
 # --------------------------------------------------------------------------
 # check: offline, against a checked-out repo
 # --------------------------------------------------------------------------
@@ -1072,99 +1127,265 @@ def repo_from_git(repo_dir: str):
     return "%s:%s/%s" % (host, m.group(2), m.group(3))
 
 
-def check_lock(product: dict, sf: dict, consumer: dict, lock_text: str):
-    """Compare a consumer's lock file with the manifest's shared_files entry."""
+def source_leg(sf: dict) -> str:
+    src = sf["source"]
+    return src.get("leg") or ("paas" if src["repo"].startswith("gitea:") else "ha")
+
+
+def check_lock(product: dict, sf: dict, consumer: dict, lock_text: str, repo_dir: str | None = None):
+    """Compare a consumer's lock file with the manifest's shared_files entry.
+
+    The lock must name the manifest's commit — or an older one kept in known_commits, which
+    is only "behind" (the sync PR is pending) — and record the blobs the manifest records
+    for that commit. Given repo_dir, the copies themselves must still hash to the lock.
+    """
     src = sf["source"]
     out = []
     try:
         lock = json.loads(lock_text)
     except ValueError as exc:
-        return [finding("unknown", "shared_files", "lock 不是 JSON：%s" % exc)]
+        return [finding("unknown", "extract", "lock 不是 JSON：%s" % exc)]
     ls = lock.get("source") or {}
     if ls.get("repository") and src["repo"].split(":", 1)[1] != ls.get("repository"):
         out.append(finding("mismatch", "shared_files", "lock 來源 %s ≠ 清冊 %s" % (ls.get("repository"), src["repo"])))
     if ls.get("path") and src.get("path") and ls["path"].rstrip("/") != src["path"].rstrip("/"):
         out.append(finding("mismatch", "shared_files", "lock 路徑 %s ≠ 清冊 %s" % (ls["path"], src["path"])))
-    if ls.get("commit") != src["commit"]:
+    commit = ls.get("commit")
+    known = {k["commit"]: k for k in sf.get("known_commits") or []}
+    want, want_blobs = set(src.get("files") or []), src.get("blobs")
+    if commit in known:
+        out.append(finding("behind", "shared_files", "lock 停在清冊的舊 commit %s（清冊已到 %s），等同步 PR"
+                           % (short(commit, 10), short(src["commit"], 10))))
+        want_blobs = known[commit].get("blobs")
+        want = set(want_blobs or want)
+    elif commit != src["commit"]:
         out.append(finding("mismatch", "shared_files",
-                           "lock commit %s ≠ 清冊 %s" % (short(ls.get("commit"), 10), short(src["commit"], 10))))
+                           "lock commit %s ≠ 清冊 %s" % (short(commit, 10), short(src["commit"], 10))))
+        want_blobs = None
     if src.get("require_on_main") and ls.get("merged_to_main") is not True:
         out.append(finding("mismatch", "shared_files", "lock 未標記 merged_to_main"))
-    want = set(src.get("files") or [])
-    have = set((lock.get("files") or {}).keys())
+    files = lock.get("files") or {}
+    have = set(files.keys())
     if want != have:
         out.append(finding("mismatch", "shared_files", "檔案清單不同：清冊 %s／lock %s" % (sorted(want), sorted(have))))
+    for name in sorted(set(want_blobs or {}) & have):
+        lb = (files[name] or {}).get("git_blob")
+        if lb != want_blobs[name]:
+            out.append(finding("mismatch", "shared_files", "%s：lock blob %s ≠ 清冊 %s" % (name, short(lb, 10), short(want_blobs[name], 10))))
+    dest = lock.get("destination")
+    if repo_dir and dest:
+        root = os.path.realpath(repo_dir)
+        for name in sorted(have):
+            path = os.path.realpath(os.path.join(root, dest, name))
+            rel = os.path.join(dest, name)
+            if not path.startswith(root + os.sep):
+                out.append(finding("mismatch", "shared_files", "複本路徑 %s 超出 repo" % rel))
+            elif not os.path.isfile(path):
+                out.append(finding("mismatch", "shared_files", "複本 %s 不存在" % rel))
+            else:
+                with open(path, "rb") as fh:
+                    actual = git_blob_sha(fh.read())
+                lb = (files[name] or {}).get("git_blob")
+                if actual != lb:
+                    out.append(finding("mismatch", "shared_files", "複本 %s（blob %s）≠ lock %s：複本只能用同步工具更新"
+                                       % (rel, short(actual, 10), short(lb, 10))))
     if not out:
         out.append(finding("ok", "shared_files", "lock commit %s、%d 個檔案與清冊一致" % (short(src["commit"], 10), len(want))))
     return out
 
 
+def compare_source_blobs(sf: dict, blobs: dict, where: str):
+    """Shared files at the source (charts main, or a PR's working tree) vs the manifest.
+
+    The source may change first: a difference is "ahead" (the manifest needs a new commit
+    so the consumers can sync), never a violation.
+    """
+    src = sf["source"]
+    want = src.get("blobs")
+    if not want:
+        return [finding("info", "shared_files", "清冊沒有記錄共用檔 blob，略過來源端比對")]
+    changed = [n for n in sorted(want) if blobs.get(n) != want[n]]
+    out = []
+    if changed:
+        out.append(finding("ahead", "shared_files", "共用檔與清冊 commit %s 不同（%s）：%s。合併後要開清冊 PR 換 commit，HA 才會同步"
+                           % (short(src["commit"], 10), where, "、".join(changed))))
+    else:
+        out.append(finding("ok", "shared_files", "%d 個共用檔與清冊 commit %s 一致（%s）" % (len(want), short(src["commit"], 10), where)))
+    extra = sorted(set(blobs) - set(want))
+    if extra:
+        out.append(finding("info", "shared_files", "%s 另有 PaaS 專用檔（不共用）：%s" % (src["path"], ", ".join(extra))))
+    return out
+
+
+def check_shared_source(sf: dict, repo_dir: str):
+    """compare_source_blobs on a checked-out source repo (e.g. a charts PR)."""
+    src = sf["source"]
+    base = os.path.join(repo_dir, src["path"])
+    blobs = {}
+    if os.path.isdir(base):
+        for name in os.listdir(base):
+            path = os.path.join(base, name)
+            if os.path.isfile(path):
+                with open(path, "rb") as fh:
+                    blobs[name] = git_blob_sha(fh.read())
+    return compare_source_blobs(sf, blobs, "工作目錄")
+
+
+def _read(path: str) -> str:
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
+
+
+def _rollup(fs):
+    st = worst([f["status"] for f in fs])
+    return {"status": "ok" if st == "info" else st, "version": None, "findings": fs}
+
+
+def _extract_failed(res) -> bool:
+    return any(f["rule"] == "extract" for f in res["findings"])
+
+
+def check_repo(m: dict, leg: str, repo_dir: str, repo: str | None, today, product: str | None = None):
+    """Evaluate every pin of `leg` that lives in the checked-out repo (offline).
+
+    Returns [(product name, product, pin, result)]. With `repo` known, a pin whose file is
+    missing is reported (unknown/extract) instead of skipped. Shared files are checked on
+    both ends: a consumer's lock (and its copies), and the source's working tree.
+    """
+    results = []
+    for pname, p in m["products"].items():
+        if product and pname != product:
+            continue
+        rows = []
+        for pin in iter_pins(p, leg):
+            if repo and pin["repo"] != repo:
+                continue
+            path = os.path.join(repo_dir, pin["file"])
+            if not os.path.exists(path):
+                if repo:
+                    rows.append((pin, {"status": "unknown", "version": None,
+                                       "findings": [finding("unknown", "extract", "找不到 %s" % pin["file"])]}))
+                continue
+            try:
+                obs = observe(pin, run_extractor(pin, _read(path)))
+            except Exception as exc:  # parse error in the leg file
+                rows.append((pin, {"status": "unknown", "version": None,
+                                   "findings": [finding("unknown", "extract", "解析失敗：%s" % exc)]}))
+                continue
+            rows.append((pin, evaluate(p, leg, pin, obs, today)))
+        ceiling = (p.get("policy") or {}).get("license_ceiling")
+        judged = [(pin, r) for pin, r in rows if pin.get("compare", "version") != "info" and not _extract_failed(r)]
+        if ceiling and judged and not any(parse_version(r.get("version")) for _, r in judged):
+            # e.g. a seed pinned to a digest the manifest does not know: offline, neither the
+            # version nor the license can be told, so the license gate fails closed.
+            rows.append(({"id": "license", "file": judged[0][0]["file"]}, {"status": "violation", "version": None, "findings": [
+                finding("violation", "license_ceiling", "判讀不出上游版本，無法確認授權上限 %s：先把這個 digest 登記進清冊（target 或 known_versions）"
+                        % ceiling)]}))
+        for sf in p.get("shared_files") or []:
+            for c in sf.get("consumers") or []:
+                if c["leg"] != leg or (repo and c["repo"] != repo):
+                    continue
+                path = os.path.join(repo_dir, c["lock"])
+                if not os.path.exists(path):
+                    if repo:
+                        rows.append(({"id": "shared_files", "file": c["lock"]}, _rollup([finding("unknown", "extract", "找不到 lock %s" % c["lock"])])))
+                    continue
+                rows.append(({"id": "shared_files", "file": c["lock"]}, _rollup(check_lock(p, sf, c, _read(path), repo_dir))))
+            src = sf["source"]
+            if repo and src["repo"] == repo and source_leg(sf) == leg:
+                rows.append(({"id": "shared_source", "file": src["path"]}, _rollup(check_shared_source(sf, repo_dir))))
+        results.extend((pname, p, pin, res) for pin, res in rows)
+    return results
+
+
+def _annotation(text: str) -> str:
+    return str(text).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _manifest_rev(path: str):
+    try:
+        return subprocess.run(["git", "-C", os.path.dirname(os.path.abspath(path)), "rev-parse", "--short", "HEAD"],
+                              capture_output=True, text=True, check=True).stdout.strip() or None
+    except Exception:
+        return None
+
+
+def render_check_summary(doc: dict) -> str:
+    """Markdown for $GITHUB_STEP_SUMMARY (GitHub Actions and Gitea act_runner)."""
+    out = []
+    A = out.append
+    verdict = "❌ 失敗：%d 項會擋" % doc["blocking"] if doc["result"] == "fail" else "✅ 通過"
+    if doc["warnings"]:
+        verdict += "（%d 項警告）" % doc["warnings"]
+    A("### woow release train：`wvt check`（%s · `%s`）" % (LEG_NAMES.get(doc["leg"], doc["leg"]), doc["repo"]))
+    A("")
+    A("%s。清冊第 %s 期，enforcement `%s`（%s）；清冊版本 `%s`。" % (
+        verdict, doc["phase"], doc["enforcement"], FAIL_ON_TEXT[doc["fail_on"]], doc.get("manifest_rev") or "?"))
+    A("")
+    if not doc["results"]:
+        A("這個 repo 在清冊的這一邊沒有釘點。")
+        return "\n".join(out) + "\n"
+    A("| 產品 | 釘點 | 檔案 | 觀測值 | 狀態 | 說明 |")
+    A("|---|---|---|---|---|---|")
+    for r in doc["results"]:
+        msgs = "；".join(("**擋**：" if f["blocking"] else "") + f["message"] for f in r["findings"]
+                        if f["status"] not in ("ok", "info") or r["pin"] in ("shared_files", "shared_source"))
+        A("| %s | %s | `%s` | %s | %s | %s |" % (r["product"], r["pin"], _md(r["file"]), _md(r.get("version") or "—"),
+                                               STATUS_LABELS[r["status"]], _md(msgs)))
+    A("")
+    A("只比上游身分；add-on／chart 版號不跨邊比較。要越過硬規則：在清冊加一筆有理由與到期日的例外（開 PR，人工合併）。")
+    return "\n".join(out) + "\n"
+
+
+FAIL_ON_TEXT = {"none": "只報告，不擋", "violation": "只有硬規則會擋，其他只警告", "drift": "嚴格：任何漂移都擋"}
+
+
 def cmd_check(args) -> int:
     m = load_manifest(args.manifest)
-    errors, _ = validate_manifest(m)
+    errors, _ = validate_manifest(m, _today(args), expiry=False)
     if errors:
         for e in errors:
             print("ERROR manifest: %s" % e)
         return 2
     repo = args.repo or repo_from_git(args.repo_dir)
-    today = _today(args)
-    results = []
-    for pname, p in m["products"].items():
-        if args.product and pname != args.product:
-            continue
-        for pin in iter_pins(p, args.leg):
-            if repo and pin["repo"] != repo:
-                continue
-            path = os.path.join(args.repo_dir, pin["file"])
-            if not os.path.exists(path):
-                if repo:
-                    results.append((pname, p, pin, {"status": "unknown", "version": None,
-                                                     "findings": [finding("unknown", "extract", "找不到 %s" % pin["file"])]}))
-                continue
-            with open(path, encoding="utf-8") as fh:
-                text = fh.read()
-            try:
-                obs = observe(pin, run_extractor(pin, text))
-            except Exception as exc:  # parse error in the leg file
-                results.append((pname, p, pin, {"status": "unknown", "version": None,
-                                                 "findings": [finding("unknown", "extract", "解析失敗：%s" % exc)]}))
-                continue
-            results.append((pname, p, pin, evaluate(p, args.leg, pin, obs, today)))
-        for sf in p.get("shared_files") or []:
-            for c in sf.get("consumers") or []:
-                if c["leg"] != args.leg or (repo and c["repo"] != repo):
-                    continue
-                path = os.path.join(args.repo_dir, c["lock"])
-                if not os.path.exists(path):
-                    continue
-                with open(path, encoding="utf-8") as fh:
-                    fs = check_lock(p, sf, c, fh.read())
-                results.append((pname, p, {"id": "shared_files", "file": c["lock"]},
-                                {"status": worst([f["status"] for f in fs]), "version": None, "findings": fs}))
+    fail_on = ENFORCEMENT[m["enforcement"]] if args.fail_on == "auto" else args.fail_on
+    results = check_repo(m, args.leg, args.repo_dir, repo, _today(args), args.product)
+    gha = bool(os.environ.get("GITHUB_ACTIONS") or os.environ.get("GITEA_ACTIONS"))
+    fail, nblock, nwarn, items = False, 0, 0, []
+    for pname, p, pin, res in results:
+        print("%-8s %-5s %-14s %-40s %s  %s" % (pname, args.leg, pin["id"], pin["file"], res.get("version") or "—",
+                                                STATUS_LABELS[res["status"]]))
+        fs = []
+        for f in res["findings"]:
+            b = blocking(p, f, fail_on)
+            lvl = None if f["status"] in ("ok", "info") else "error" if b else "warning"
+            tag = (" · 硬規則" if fail_on == "violation" else " · 嚴格") if b else ""
+            print("  - [%s%s] %s" % (f["rule"], tag, f["message"]))
+            if gha and lvl:
+                print("::%s file=%s::%s" % (lvl, pin["file"], _annotation("wvt %s/%s %s" % (pname, args.leg, f["message"]))))
+            fail = fail or b
+            nblock += b
+            nwarn += lvl == "warning"
+            fs.append(dict(f, hard=is_hard(p, f), blocking=b))
+        items.append({"product": pname, "pin": pin["id"], "file": pin["file"], "status": res["status"],
+                      "version": res.get("version"), "findings": fs,
+                      "component": ((((p.get("legs") or {}).get(args.leg) or {}).get("published")) or {}).get("id")})
     if not results:
         print("wvt check: %s 在清冊的 %s 邊沒有任何釘點（略過）" % (repo or args.repo_dir, args.leg))
-        return 0
-    gha = bool(os.environ.get("GITHUB_ACTIONS") or os.environ.get("GITEA_ACTIONS"))
-    fail = False
-    for pname, p, pin, res in results:
-        label = STATUS_LABELS[res["status"]]
-        print("%-8s %-5s %-14s %-40s %s  %s" % (pname, args.leg, pin["id"], pin["file"], res.get("version") or "—", label))
-        for f in res["findings"]:
-            hard = is_hard(p, f)
-            lvl = "error" if hard and f["status"] == "violation" else "warning"
-            if f["status"] in ("ok", "info"):
-                lvl = None
-            line = "  - [%s%s] %s" % (f["rule"], " · 硬規則(第1期起)" if hard and lvl else "", f["message"])
-            print(line)
-            if gha and lvl:
-                print("::%s file=%s::wvt %s/%s %s" % (lvl, pin["file"], pname, args.leg, f["message"]))
-            if args.fail_on == "drift" and f["status"] in DRIFT_STATUSES:
-                fail = True
-            if args.fail_on == "violation" and f["status"] in ("violation", "mismatch") and hard:
-                fail = True
-    phase = m.get("phase", 0)
-    if args.fail_on == "none":
-        print("（第 %s 期：只報告，不擋流程）" % phase)
+    else:
+        print("wvt check %s：%s（第 %s 期，%s；%d 項警告）" % (
+            "失敗" if fail else "通過", "%d 項會擋" % nblock if fail else "沒有會擋的項目", m.get("phase"),
+            FAIL_ON_TEXT[fail_on], nwarn))
+    doc = {"repo": repo, "leg": args.leg, "phase": m.get("phase"), "enforcement": m.get("enforcement"), "fail_on": fail_on,
+           "manifest_rev": _manifest_rev(args.manifest), "result": "fail" if fail else "pass",
+           "blocking": nblock, "warnings": nwarn, "results": items}
+    if args.json:
+        with open(args.json, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, ensure_ascii=False, indent=1)
+    summary = args.summary or os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write(render_check_summary(doc))
     return 1 if fail else 0
 
 
@@ -1253,21 +1474,23 @@ class Fetcher:
         return None if data is None else data.get("total_commits")
 
 
+_ADDON_TAG = re.compile(r"\b(v\d+\.0\.\d+\.\d+\.\d+)\b")
+# a comment line that starts another release note (or a section) ends the note before it
+_NOTE_START = re.compile(r"^\s*#\s*(\d{4}-\d{2}-\d{2}\b|\d{3}:|前一顆|── )")
+
+
 def extract_addon_ref(values_text: str):
     """Production platform addon tag from paas-app-bundle-cd values-prod.yaml.
 
-    The pinned image is structured (image.tag/digest) but the platform release it
-    was built from is only recorded in the comment above it ("Built from addon_ref
-    v18.0.1.0.242"). Take the first (topmost = newest) platform tag mentioned in the
-    '── image ──' block: release notes are prepended, so an older "addon_ref v…" line
-    further down must not win over a newer "243: v18.0.1.0.243" line above it.
+    The pinned image is structured (image.tag/digest) but the platform release it was built
+    from is only recorded in the comments above `image:` ("243: v18.0.1.0.243 / …",
+    "# 2026-10-22: addon .253（v18.0.1.0.253 → …）"). Notes are prepended — first inside the
+    '── image ──' block, since .253 at the top of the file — so the newest note names its tag
+    first. A tag whose note also names the pinned image tag wins (cross_checked); without
+    such a note the first mention does.
     """
     lines = values_text.splitlines()
-    start = next((i for i, ln in enumerate(lines) if "── image ──" in ln), 0)
-    end = next((i for i, ln in enumerate(lines) if i > start and re.match(r"^image:", ln)), len(lines))
-    block = "\n".join(lines[start:end])
-    m = re.search(r"\b(v\d+\.0\.\d+\.\d+\.\d+)\b", block)
-    tag = m.group(1) if m else None
+    end = next((i for i, ln in enumerate(lines) if re.match(r"^image:", ln)), len(lines))
     img = {}
     for ln in lines[end + 1: end + 12]:
         if ln and not ln.startswith(" "):
@@ -1275,7 +1498,19 @@ def extract_addon_ref(values_text: str):
         mm = re.match(r'^\s+(tag|digest):\s*["\']?([^"\'\s]+)', ln)
         if mm:
             img.setdefault(mm.group(1), mm.group(2))
-    return {"tag": tag, "image_tag": img.get("tag"), "image_digest": img.get("digest")}
+    comments = [ln for ln in lines[:end] if ln.lstrip().startswith("#")]
+    cands = [(k, m.group(1)) for k, m in ((k, _ADDON_TAG.search(ln)) for k, ln in enumerate(comments)) if m]
+    tag, checked = (cands[0][1] if cands else None), False
+    for k, t in cands if img.get("tag") else []:
+        note = [comments[k]]
+        for ln in comments[k + 1:]:
+            if _NOTE_START.match(ln) or _ADDON_TAG.search(ln):
+                break
+            note.append(ln)
+        if any(img["tag"] in ln for ln in note):
+            tag, checked = t, True
+            break
+    return {"tag": tag, "image_tag": img.get("tag"), "image_digest": img.get("digest"), "cross_checked": checked}
 
 
 def resolve_ref(ref: str, ctx: dict):
@@ -1297,6 +1532,9 @@ def collect_drift(m: dict, f: Fetcher, today: _dt.date | None = None) -> dict:
             ctx[name + "_info"] = info
             if not info["tag"]:
                 notes.append("無法從 %s 判讀正式站平台版" % src["file"])
+            elif not info["cross_checked"]:
+                notes.append("正式站平台版 %s 取自 %s 最上面的發版註記，該註記沒有寫到 image tag %s，無法交叉驗證"
+                             % (info["tag"], src["file"], info["image_tag"]))
         except WvtError as exc:
             notes.append("讀不到 %s:%s（%s）" % (src["repo"], src["file"], exc))
             ctx[name] = None
@@ -1344,7 +1582,7 @@ def collect_drift(m: dict, f: Fetcher, today: _dt.date | None = None) -> dict:
     drift = any(r["status"] in DRIFT_STATUSES for r in rows) or any(e["days_left"] < 0 for e in exceptions)
     now = _dt.datetime.now(_dt.timezone.utc)
     return {"generated_at": "%s（台北 %s）" % (now.strftime("%Y-%m-%d %H:%M UTC"), now.astimezone(TAIPEI).strftime("%m-%d %H:%M")),
-            "today": today.isoformat(), "phase": m.get("phase"), "context": ctx, "rows": rows,
+            "today": today.isoformat(), "phase": m.get("phase"), "enforcement": m.get("enforcement"), "context": ctx, "rows": rows,
             "exceptions": exceptions, "observations": m.get("observations") or [], "notes": notes,
             "probes": f.probes, "drift": drift}
 
@@ -1422,20 +1660,30 @@ def _package_row(pname, leg, legd, pkg, rref, ref, f):
 
 
 def _shared_rows(p, pname, sf, f):
+    """One row per consumer lock (vs the manifest) plus one for the source's main (vs the manifest)."""
     rows = []
     src = sf["source"]
+    branch = src.get("branch", "main")
+    srow = {"product": pname, "leg": source_leg(sf), "pin": "shared_source", "file": src["path"], "repo": src["repo"],
+            "ref": branch, "point": "共用檔案來源（%s）" % branch, "compare": "shared_files"}
     try:
-        main_blobs = f.blob_shas(src["repo"], src["path"], src.get("branch", "main"))
+        main_blobs = f.blob_shas(src["repo"], src["path"], branch)
     except WvtError as exc:
-        main_blobs = None
-        err = str(exc)
+        srow.update(status="unreachable", version=None, observed=None,
+                    findings=[finding("unreachable", "fetch", "讀不到 %s %s 的檔案清單（%s）" % (src["repo"], branch, exc))])
     else:
-        err = None
-    behind = None
-    try:
-        behind = f.commits_between(src["repo"], src["commit"], src.get("branch", "main"))
-    except WvtError:
-        pass
+        if main_blobs is None:
+            fs = [finding("unknown", "fetch", "%s@%s 不存在" % (src["path"], branch))]
+        else:
+            fs = compare_source_blobs(sf, main_blobs, "%s %s" % (src["repo"].split(":", 1)[1], branch))
+        try:
+            behind = f.commits_between(src["repo"], src["commit"], branch)
+        except WvtError:
+            behind = None
+        if behind:
+            fs.append(finding("info", "shared_files", "清冊 commit 之後 %s 又有 %s 個 commit" % (branch, behind)))
+        srow.update(_rollup(fs), version=short(src["commit"], 10), observed=None)
+    rows.append(srow)
     for c in sf.get("consumers") or []:
         row = {"product": pname, "leg": c["leg"], "pin": "shared_files", "file": c["lock"], "repo": c["repo"],
                "ref": c.get("ref", "main"), "point": "共用檔案 lock", "compare": "shared_files"}
@@ -1450,25 +1698,11 @@ def _shared_rows(p, pname, sf, f):
             rows.append(row)
             continue
         fs = check_lock(p, sf, c, text)
-        lock = json.loads(text)
-        if main_blobs is None:
-            fs.append(finding("unreachable", "shared_files", "讀不到 %s main 的檔案清單（%s）" % (src["repo"], err)))
-        else:
-            for name in src.get("files") or []:
-                lb = ((lock.get("files") or {}).get(name) or {}).get("git_blob")
-                mb = main_blobs.get(name)
-                if lb != mb:
-                    fs.append(finding("mismatch", "shared_files",
-                                      "%s：lock blob %s ≠ %s main %s" % (name, short(lb, 10), src["repo"], short(mb, 10))))
-            extra = sorted(set(main_blobs) - set(src.get("files") or []))
-            if extra:
-                fs.append(finding("info", "shared_files", "%s main 另有 PaaS 專用檔（不共用）：%s" % (src["path"], ", ".join(extra))))
-        if behind:
-            fs.append(finding("info", "shared_files", "清冊 commit 之後 main 又有 %s 個 commit（共用檔內容見上）" % behind))
-        row.update(status=worst([x["status"] for x in fs]), version=short(src["commit"], 10),
-                   observed={"raw": (lock.get("source") or {}).get("commit")}, findings=fs)
-        if row["status"] == "info":
-            row["status"] = "ok"
+        try:
+            lock_commit = (json.loads(text).get("source") or {}).get("commit")
+        except ValueError:
+            lock_commit = None
+        row.update(_rollup(fs), version=short(src["commit"], 10), observed={"raw": lock_commit})
         rows.append(row)
     return rows
 
@@ -1486,7 +1720,9 @@ def render_markdown(m: dict, rep: dict) -> str:
     A(TRACKING_MARKER)
     A("# 版本漂移報告（woow release train）")
     A("")
-    A("- 產生時間：%s；第 %s 期：**只報告，不擋任何流程**" % (rep["generated_at"], rep["phase"]))
+    enf = rep.get("enforcement") or "report-only"
+    A("- 產生時間：%s；第 %s 期，enforcement `%s`：本報告不擋流程；各邊 CI 的 `wvt check` %s"
+      % (rep["generated_at"], rep["phase"], enf, FAIL_ON_TEXT[ENFORCEMENT.get(enf, "none")]))
     prod = rep["context"].get("prod_platform_info") or {}
     if rep["context"].get("prod_platform"):
         A("- 正式站平台版：`%s`（`paas-app-bundle-cd:paas-odoo-platform/values-prod.yaml`，image `%s@%s`）"
@@ -1510,7 +1746,7 @@ def render_markdown(m: dict, rep: dict) -> str:
         for leg in LEGS:
             rs = [r for r in rep["rows"] if r["product"] == pname and r["leg"] == leg and r["compare"] != "info"]
             st = worst([r["status"] for r in rs]) if rs else "unknown"
-            vers = sorted({r["version"] for r in rs if r.get("version") and r["pin"] != "shared_files"},
+            vers = sorted({r["version"] for r in rs if r.get("version") and r["pin"] not in ("shared_files", "shared_source")},
                           key=lambda v: parse_version(v) or (0,))
             cells.append("%s %s" % (STATUS_LABELS[st], " / ".join(vers) or ""))
         allst = worst([r["status"] for r in rep["rows"] if r["product"] == pname and r["compare"] != "info"] or ["unknown"])
@@ -1548,7 +1784,7 @@ def render_markdown(m: dict, rep: dict) -> str:
     if rep["observations"]:
         A("## 已部署（手動快照，非即時）")
         A("")
-        A("範本對齊不等於線上服務對齊：租戶要 Redeploy 才換版。第 1 期起改由 operator 回報。")
+        A("範本對齊不等於線上服務對齊：租戶要 Redeploy 才換版。目前仍是手動快照，改由平台自動回報列在後續工作。")
         A("")
         A("| 產品 | 快照日 | 來源 | 內容 |")
         A("|---|---|---|---|")
@@ -1697,9 +1933,12 @@ def main(argv=None) -> int:
     c.add_argument("--repo-dir", default=".")
     c.add_argument("--repo", help="github:OWNER/REPO or gitea:OWNER/REPO (default: from git remote)")
     c.add_argument("--product")
-    c.add_argument("--fail-on", choices=("none", "violation", "drift"), default="none",
-                   help="none = phase 0 report-only; violation = hard rules (phase 1); drift = everything")
+    c.add_argument("--fail-on", choices=("auto", "none", "violation", "drift"), default="auto",
+                   help="auto (default) = from the manifest's enforcement; none = report only; "
+                        "violation = the products' hard rules; drift = everything")
     c.add_argument("--strict", action="store_const", const="drift", dest="fail_on", help="same as --fail-on drift")
+    c.add_argument("--json", help="also write the results as JSON")
+    c.add_argument("--summary", help="append a markdown summary here (default: $GITHUB_STEP_SUMMARY when set)")
     d = sub.add_parser("drift", help="fetch real sources and render the drift table")
     d.add_argument("--out")
     d.add_argument("--json")

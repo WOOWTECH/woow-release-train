@@ -78,11 +78,21 @@ class DriftTest(unittest.TestCase):
         self.assertEqual({r["status"] for r in seed}, {"unreachable", "behind"})
 
     def test_shared_file_changed_on_main(self):
+        # PaaS changed a shared file first: the source is ahead of the manifest, HA's lock still matches it
         blobs = dict(LITELLM_MAIN_BLOBS, **{"woow_chatgpt.py": "f" * 40})
         rep = self.collect(blobs=blobs)
-        sf = rows(rep, "litellm", "ha", "shared_files")[0]
-        self.assertEqual(sf["status"], "mismatch")
-        self.assertTrue(any("woow_chatgpt.py" in f["message"] for f in sf["findings"]))
+        src = rows(rep, "litellm", "paas", "shared_source")[0]
+        self.assertEqual(src["status"], "ahead")
+        self.assertTrue(any("woow_chatgpt.py" in f["message"] for f in src["findings"]))
+        self.assertEqual(rows(rep, "litellm", "ha", "shared_files")[0]["status"], "ok")
+        self.assertTrue(rep["drift"])
+
+    def test_lock_at_known_commit_is_behind(self):
+        sf = self.m["products"]["litellm"]["shared_files"][0]
+        sf["known_commits"] = [{"commit": sf["source"]["commit"], "blobs": dict(sf["source"]["blobs"])}]
+        sf["source"]["commit"] = "a" * 40
+        rep = self.collect()
+        self.assertEqual(rows(rep, "litellm", "ha", "shared_files")[0]["status"], "behind")
 
     def test_connectivity_probe_does_not_change_drift(self):
         class ProbeFail(FakeFetcher):

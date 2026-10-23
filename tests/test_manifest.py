@@ -19,9 +19,18 @@ class RealManifestTest(unittest.TestCase):
         for p in manifest()["products"].values():
             self.assertLessEqual(set(p["legs"]), {"ha", "paas"})
 
-    def test_phase0_report_only(self):
+    def test_phase1_hard_rules(self):
         m = manifest()
-        self.assertEqual((m["phase"], m["enforcement"]), (0, "report-only"))
+        self.assertEqual((m["phase"], m["enforcement"]), (1, "hard-rules"))
+        # phase 1 opens exactly the two hard rules of the owner decision (README); n8n stays advisory
+        prods = m["products"]
+        self.assertEqual(prods["emqx"]["policy"]["hard_rules"], ["license_ceiling", "exception_expired"])
+        self.assertEqual(prods["litellm"]["policy"]["hard_rules"], ["digest", "shared_files", "exception_expired"])
+        self.assertEqual(prods["n8n"]["policy"]["hard_rules"], [])
+
+    def test_shared_file_blobs_recorded(self):
+        src = manifest()["products"]["litellm"]["shared_files"][0]["source"]
+        self.assertEqual(set(src["blobs"]), set(src["files"]))
 
     def test_policies_match_owner_decision(self):
         prods = manifest()["products"]
@@ -117,6 +126,37 @@ class MutationTest(unittest.TestCase):
         m = manifest()
         m["products"]["litellm"]["shared_files"][0]["source"]["commit"] = "4ad95a11"
         self.assertError(m, "full 40-hex")
+
+    def test_enforcement_values(self):
+        m = manifest()
+        m["enforcement"] = "block-all"
+        self.assertError(m, "enforcement must be one of")
+        m = manifest()
+        m["phase"] = 0
+        self.assertError(m, "phase 0 is report-only")
+        m = manifest()
+        m["enforcement"] = "report-only"
+        errors, warnings = validate(m)
+        self.assertEqual(errors, [])
+        self.assertTrue(any("no CI gate fails" in w for w in warnings))
+
+    def test_shared_blobs_must_cover_files(self):
+        m = manifest()
+        del m["products"]["litellm"]["shared_files"][0]["source"]["blobs"]["woow_chatgpt.py"]
+        self.assertError(m, "blobs must list exactly the shared files")
+        m = manifest()
+        m["products"]["litellm"]["shared_files"][0]["source"]["blobs"]["woow_chatgpt.py"] = "527c16c6"
+        self.assertError(m, "40-hex git blob")
+
+    def test_known_commit_cannot_repeat_current(self):
+        m = manifest()
+        sf = m["products"]["litellm"]["shared_files"][0]
+        sf["known_commits"] = [{"commit": sf["source"]["commit"]}]
+        self.assertError(m, "duplicates the current commit")
+
+    def test_check_does_not_fail_manifest_on_expiry(self):
+        errors, _ = wvt.validate_manifest(manifest(), dt.date(2026, 11, 16), expiry=False)
+        self.assertEqual(errors, [])
 
     def test_stale_observation_warns(self):
         _, warnings = validate(manifest(), dt.date(2026, 11, 5))

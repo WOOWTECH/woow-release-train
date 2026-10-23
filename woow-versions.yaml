@@ -4,7 +4,8 @@
 #   - HA 與 PaaS 都對齊這份清冊；Podman／k3s 不在範圍內，不建模。
 #   - lockstep：EMQX、LiteLLM（之後 OpenDesign、code-server）
 #     range：n8n（之後 Hermes、Omnigent、Headscale、Tailscale）
-#   - 第 0 期只報告：任何檢查都不擋 HA／PaaS 的流程。
+#   - 第 0 期只報告；第 1 期（2026-10-24 起）兩邊 CI 都跑 `wvt check`，
+#     只有各產品 policy.hard_rules 會擋，其他只警告。
 #
 # 規則：
 #   - 只比「上游身分」（版本＋index digest＋各架構 digest）。add-on 版號、chart 版號、
@@ -17,8 +18,10 @@
 # tools/wvt.py 內建的解析器讀取（不需 PyYAML）。
 
 schema: 1
-phase: 0            # 0 只報告 → 1 警告＋硬規則 → 2 機器人開 PR → 3 擴大產品
-enforcement: report-only
+phase: 1            # 0 只報告 → 1 警告＋硬規則 → 2 機器人開 PR → 3 擴大產品
+# 各邊 CI 的 `wvt check` 不帶 --fail-on，照這個值決定擋什麼：
+#   report-only＝都不擋（緊急開關）；hard-rules＝只擋 hard_rules；strict＝任何漂移都擋。
+enforcement: hard-rules
 
 sources:
   # 正式站 Fleet 釘的平台版（Odoo 映像建自哪個 woow_paas_platform tag）。
@@ -153,13 +156,21 @@ products:
     shared_files:
       # Woow 外掛（ChatGPT 訂閱等）由 charts 單一來源，HA 逐位元組複製並寫 lock。
       # charts main 另有 PaaS 專用的 woow_revoke_ui_sessions.py，不在共用清單內。
+      # 來源（PaaS）可以先改：charts 的 CI 對改過的共用檔只警告；合併後開清冊 PR 換 commit／blobs，
+      # 舊的一組移到 known_commits（HA 的 lock 停在舊 commit 只算落後，不擋 HA 其他 PR）。
       - source:
+          leg: paas
           repo: "gitea:woow-paas/woow-paas-charts"
           path: charts/litellm/files/
           branch: main
           commit: "4ad95a11d8dad671b342d6cc9454c87a3130e8b6"
           require_on_main: true
           files: [sitecustomize.py, woow_chatgpt.py, woow_chatgpt_plugin.py]
+          blobs:   # git blob（git rev-parse <commit>:<path><file>）
+            sitecustomize.py: "f5407aacd4ed0d0202da7d6c578ef6a267b8a45b"
+            woow_chatgpt.py: "527c16c68a83958cc2f124253632b98de20b56c6"
+            woow_chatgpt_plugin.py: "cfcd0f65c257f44db3e995ea6fd635e76c7255f3"
+        known_commits: []
         consumers:
           - leg: ha
             repo: "github:WOOWTECH/Woow_ha_litellm"
@@ -318,7 +329,7 @@ products:
             note: "8gears 2.0.1 沒有 startupProbe（seed 以 liveness initialDelay 補）"
     exceptions: []
     notes:
-      - "PaaS 升 2.43.6 進行中：JCR 鏡像 n8n:20261015.2140 ← docker.io/n8nio/n8n@sha256:371dd463…（amd64）待 paas-odoo-ci /approve，之後才有 seed PR；遷移單向，既有服務逐台備份後 Redeploy。"
+      - "PaaS 已於 10-16 隨平台 .243 升到 2.43.6（JCR n8n:20261015.2215 ← docker.io/n8nio/n8n@sha256:371dd463…，amd64）；遷移單向，既有服務逐台備份後 Redeploy。"
 
 # 線上實際部署的手動快照（非真相來源，只供 drift 報告參考；第 1 期起改由 operator 回報）。
 # 本 repo 有公開鏡像：只寫數量與版本，不寫租戶的服務 ID／工作區名稱。
