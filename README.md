@@ -4,7 +4,7 @@
 
 - **主 repo**：Gitea `woow-paas/woow-release-train`（https://git-prod.woowtech.io/woow-paas/woow-release-train）
 - **公開鏡像**：GitHub `WOOWTECH/woow-release-train`，唯讀，由 Gitea Actions 單向推送。GitHub 端不要直接改，下次鏡像會覆蓋。
-- **目前階段**：第 0 期，**只報告，不擋任何流程**。
+- **目前階段**：第 1 期（2026-10-24 起）。HA 與 PaaS 的 CI 都跑 `wvt check`，**只有各產品的硬規則會擋，其他只警告**。
 
 ## 為什麼要有這個 repo
 
@@ -28,6 +28,7 @@ HA 和 PaaS 各自升版，結果常常不一致。例如 n8n 在 HA 已是 2.43
 | 自動化程度 | 機器人只開 PR、跑測試；合併與發版一律由人做 |
 | Gitea | 機器人**永遠不合併** Gitea PR，也**不簽** paas-odoo-ci 的 `/approve` |
 | 第 0 期 | 只放 EMQX、LiteLLM、n8n 三個產品，只出報告 |
+| 雙向同步（2026-10-24） | 照建議進行第 1–3 期：兩邊 CI 檢查 → 機器人雙向開 PR → 加入 Hermes、OpenDesign、MCP servers。兩邊都人工合併；GitHub 端機器人用 GitHub App；公開鏡像的早期歷史一併清理 |
 
 ## 清冊格式（schema 1）
 
@@ -37,8 +38,8 @@ HA 和 PaaS 各自升版，結果常常不一致。例如 n8n 在 HA 已是 2.43
 
 ```yaml
 schema: 1
-phase: 0                      # 0 只報告 → 1 警告＋硬規則 → 2 機器人 PR → 3 擴大
-enforcement: report-only
+phase: 1                      # 0 只報告 → 1 警告＋硬規則 → 2 機器人 PR → 3 擴大
+enforcement: hard-rules       # 各邊 CI 擋什麼：report-only（都不擋）／hard-rules（只擋硬規則）／strict（任何漂移都擋）
 sources:
   prod_platform:              # 正式站 Fleet 釘的平台版（從 CD values-prod.yaml 的註解讀 addon_ref）
     repo: "gitea:woow-paas/paas-app-bundle-cd"
@@ -59,7 +60,10 @@ products:
       platforms: { amd64: "sha256:...", arm64: "sha256:..." }
       artifacts: { <名稱>: "sha256:..." }   # 非映像的上游產物，例如 tarball
     known_versions: [...]           # 舊版的 digest，用來把「落後的 digest」換算回版本
-    shared_files: [...]             # 共用檔（例如 LiteLLM Woow 外掛）：來源 commit＋各邊 lock
+    shared_files:                   # 共用檔（例如 LiteLLM Woow 外掛）：來源 commit＋blob、各邊 lock
+      - source: { leg: paas, repo: ..., path: ..., commit: "<40 hex>", files: [...], blobs: { <檔名>: "<git blob>" } }
+        known_commits: [{ commit: "<舊 commit>", blobs: {...} }]   # lock 停在這些只算落後
+        consumers: [{ leg: ha, repo: ..., lock: ... }]
     legs:
       ha:   { repo: "github:WOOWTECH/...", pins: [...], package_version: [...], published: {kind: catalog, ...} }
       paas: { pins: [...], package_version: [...] }
@@ -95,14 +99,23 @@ probes: { api.github.com: https://api.github.com/rate_limit }   # 只測連線�
 ```sh
 python3 tools/wvt.py validate                       # 格式＋一致性＋例外到期（到期＝失敗，14 天內＝警告）
 python3 tools/wvt.py check --leg ha --repo-dir .    # 在某個 HA／PaaS repo 的 CI 裡比對自己的釘點（離線）
-python3 tools/wvt.py check --leg paas --repo-dir . --fail-on violation   # 第 1 期：只有硬規則會失敗
-python3 tools/wvt.py check --leg paas --repo-dir . --strict              # 任何漂移都失敗（之後的期別）
+python3 tools/wvt.py check --leg paas --repo-dir . --fail-on none        # 只報告（本機查看用）
+python3 tools/wvt.py check --leg paas --repo-dir . --strict              # 任何漂移都失敗
+python3 tools/wvt.py check --leg ha --repo-dir . --json out.json --summary summary.md
 python3 tools/wvt.py drift --out drift.md --json drift.json              # 抓真實來源、產生報告
 python3 tools/wvt.py issue --report drift.md --json drift.json           # 建立／更新／關閉追蹤 issue
 python3 -m unittest discover -s tests -v
 ```
 
-`check` 會從 `git remote` 推斷自己是哪個 repo，也可以用 `--repo github:OWNER/REPO` 指定。第 0 期一律回傳 0，只印出警告。
+`check` 會從 `git remote` 推斷自己是哪個 repo，也可以用 `--repo github:OWNER/REPO` 指定。不帶 `--fail-on` 時照清冊的 `enforcement` 決定擋什麼，所以各邊 CI 的判準只寫在清冊：要全部放寬（緊急開關），開一張把 `enforcement` 改成 `report-only` 的清冊 PR 即可。`--json` 輸出機器可讀的結果；在 GitHub Actions／Gitea act_runner 裡會自動寫 `$GITHUB_STEP_SUMMARY` 摘要，並對每項發現加上 `::error`／`::warning` 註記。
+
+`check` 的判定規則：
+
+- **硬規則**（各產品 `policy.hard_rules`）違反或不符 → 失敗；其他差異（落後、領先、例外快到期）只警告。
+- **讀不到就擋（fail closed）**：有硬規則的產品，釘點檔案或 lock 讀不到、解析失敗，視同硬規則無法驗證 → 失敗。
+- **授權上限要能驗**：有 `license_ceiling` 的產品，若本 repo 所有釘點都判讀不出上游版本（例如 seed 釘了清冊不認得的 digest）→ 失敗。先把該 digest 登記進清冊（`target` 或 `known_versions`）。
+- **例外到期只影響自己**：`check` 不因別的產品例外過期而整份清冊失效；過期的例外只讓該產品的那一邊失敗（`exception_expired`）。
+- **共用檔兩端分開看**：消費端（HA lock）的 commit／blob 必須等於清冊，複本內容必須等於 lock；lock 停在 `known_commits` 只算落後。來源端（charts）先改了共用檔只算領先（警告），合併後開清冊 PR 換 commit。
 
 `drift` 的資料來源：
 
@@ -118,12 +131,73 @@ python3 -m unittest discover -s tests -v
 | `ci.yml` | push、PR | `wvt validate`＋單元測試。只擋本 repo 的清冊 PR |
 | `drift.yml` | 每天台北 08:41、手動 | 跑 `wvt drift`，維護**一張**帶 `version-drift` label 的 issue：有漂移就建立或更新，沒有就留言後關閉 |
 | `mirror-github.yml` | push main／tag、每天、手動 | 用 deploy key（repo secret `GH_MIRROR_DEPLOY_KEY`）把 main 和 tag 推到 GitHub |
+| `.github/workflows/wvt-check.yml` | 只在 GitHub（`workflow_call`） | HA repo 呼叫的可重用檢查。Gitea 有 `.gitea/workflows` 就不讀 `.github/workflows`，所以它只在鏡像上被使用 |
 
 權杖：
 
 - 跨 repo 讀取用 org secret `CI_GITEA_TOKEN`，因為 `paas-app-bundle-cd` 是私人 repo。
 - 寫本 repo 的 issue 用每次執行自動發的 `GITEA_TOKEN`。
 - 沒有任何 workflow 會合併或核可東西。
+
+## 第 1 期：兩邊怎麼接
+
+HA 端（GitHub）不連 Gitea：讀公開鏡像的清冊，離線比對。PaaS 端（Gitea）從叢集內網 clone 清冊，不經 GitHub。兩邊用的是同一份 main。
+
+**HA add-on repo**：新增 `.github/workflows/release-train.yml`
+
+```yaml
+name: Release train
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    name: Release train
+    uses: WOOWTECH/woow-release-train/.github/workflows/wvt-check.yml@main
+```
+
+check 名稱是 `Release train / wvt check`。Woow_HA_App_Store 的 `registry.json` 把 `.github/workflows/release-train.yml` 列進該來源的 `required_workflows`：發布與消費都會確認這個 commit 的檢查成功，沒過就不上架。
+
+**PaaS repo**（woow-paas-charts、woow_paas_platform、paas-odoo-ci）：新增 `.gitea/workflows/release-train.yml`（charts 用 `.yaml`）。刻意**不加 paths 過濾**：清冊改了也要重驗，而且日後設成 required check 時才不會讓沒碰到那些路徑的 PR 永遠缺一個 check。
+
+```yaml
+name: release-train
+on:
+  pull_request:
+  push:
+    branches: [main]          # woow_paas_platform 用 develop
+  workflow_dispatch: {}
+concurrency:
+  group: release-train-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  wvt-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: 取清冊（woow-release-train main，叢集內網）
+        env:
+          U: ${{ secrets.CI_GITEA_USERNAME }}
+          T: ${{ secrets.CI_GITEA_TOKEN }}
+        run: |
+          set -euo pipefail
+          d="${RUNNER_TEMP:-/tmp}/release-train"
+          rm -rf "$d"
+          git -c http.extraHeader="Authorization: Basic $(printf '%s:%s' "${U:-ci}" "$T" | base64 -w0)" \
+            clone -q --depth 1 http://gitea-http.gitea.svc.cluster.local:3000/woow-paas/woow-release-train.git "$d"
+          git -C "$d" log -1 --format='清冊 %h %s'
+      - name: wvt check
+        run: python3 "${RUNNER_TEMP:-/tmp}/release-train/tools/wvt.py" check --leg paas --repo "gitea:${{ github.repository }}" --repo-dir .
+```
+
+順序：先合併本 repo 的 PR（鏡像推到 GitHub 後 HA 端才呼叫得到可重用 workflow），再合併各邊的接線 PR；Store 的 `required_workflows` 最後才加，否則沒有檢查紀錄的新版本會被擋。
 
 ## 新增一個產品
 
@@ -138,8 +212,8 @@ python3 -m unittest discover -s tests -v
 
 | 期 | 內容 | 會擋什麼 |
 |---|---|---|
-| **0（現在）** | 清冊列 EMQX、LiteLLM、n8n 的現況；drift 報告＋追蹤 issue；GitHub 鏡像 | 什麼都不擋（只擋本 repo 自己的 CI） |
-| **1** | 各邊 CI 加 `wvt check --fail-on violation`（HA：Store 的可重用 workflow；PaaS：seed 測試、charts、paas-odoo-ci） | 只開兩條硬規則：**EMQX 授權上限**；**LiteLLM base digest＋外掛 lock commit／blob 必須等於清冊**（在 Gitea 驗，補上 GitHub 端只能 offline 的缺口）。其他一律警告 |
+| **0**（10-16 上線） | 清冊列 EMQX、LiteLLM、n8n 的現況；drift 報告＋追蹤 issue；GitHub 鏡像 | 什麼都不擋（只擋本 repo 自己的 CI） |
+| **1（現在）** | 各邊 CI 跑 `wvt check`（HA：各 repo 的 `release-train.yml` 呼叫可重用 workflow，Store 以 `required_workflows` 把關；PaaS：charts、woow_paas_platform、paas-odoo-ci 各一支） | 只開兩條硬規則：**EMQX 授權上限**；**LiteLLM base digest＋外掛 lock commit／blob（含複本內容）必須等於清冊**。讀不到釘點一律擋。其他一律警告 |
 | **2** | 機器人：監看上游、開清冊 PR、扇出各邊 PR、dispatch mirror-image、開 seed PR | 不擋；只產生 PR |
 | **3** | 擴大到 OpenDesign、code-server（lockstep），Hermes、Omnigent、Headscale、Tailscale（range），以及 pi-agent、Nextcloud、Odoo、MCP | range 的落後天數改成硬擋，配 SLA |
 
@@ -155,7 +229,7 @@ python3 -m unittest discover -s tests -v
 
 ## 已知限制
 
-- PaaS「已部署」欄目前是手動快照（`observations`，有日期，超過 14 天會警告）。第 1 期起改由 operator 回報。
+- PaaS「已部署」欄目前是手動快照（`observations`，有日期，超過 14 天會警告）。改由平台自動回報列在後續工作，第 1 期仍是手動。
 - 正式站平台版只寫在 CD values 的註解裡（`Built from addon_ref v18.0.1.0.NNN`）。讀不到時報告會註明，並退回只比 develop。
 - JCR 需要憑證，本 repo 不讀 JCR。PaaS 的 digest 身分靠 seed 裡的 `tag@sha256`：JCR 鏡像用 `--preserve-digests`，與上游 digest 逐字相同。
 - YAML 子集不支援 anchor、alias、tag、多文件，也不支援「折疊字串裡再縮排」這類罕見寫法。各邊的 Chart.yaml、values.yaml、config.yaml 已驗證可正確解析。

@@ -1,7 +1,9 @@
 """Shared test helpers: import wvt from tools/, fixture paths, a fake fetcher."""
 
 import copy
+import json
 import os
+import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -22,6 +24,36 @@ def fixture(*parts):
 def manifest():
     """A fresh deep copy of the real manifest (tests may mutate it)."""
     return copy.deepcopy(wvt.load_manifest(MANIFEST_PATH))
+
+
+def litellm_repo(tmp, contents=None):
+    """A Woow_ha_litellm checkout with synthetic plugin copies, plus a JSON manifest whose
+    shared-file blobs match them. The real copies are not vendored into these fixtures."""
+    contents = contents or {"sitecustomize.py": b"# a\n", "woow_chatgpt.py": b"# b\n", "woow_chatgpt_plugin.py": b"# c\n"}
+    repo = os.path.join(tmp, "repo")
+    shutil.copytree(os.path.join(FIX, "ha_litellm"), repo)
+    lock_path = os.path.join(repo, "litellm", "woow-plugin.lock.json")
+    with open(lock_path, encoding="utf-8") as fh:
+        lock = json.load(fh)
+    dest = os.path.join(repo, lock["destination"])
+    os.makedirs(dest)
+    blobs = {}
+    for name, data in contents.items():
+        with open(os.path.join(dest, name), "wb") as fh:
+            fh.write(data)
+        blobs[name] = lock["files"][name]["git_blob"] = wvt.git_blob_sha(data)
+    with open(lock_path, "w", encoding="utf-8") as fh:
+        json.dump(lock, fh, indent=2)
+    m = manifest()
+    m["products"]["litellm"]["shared_files"][0]["source"]["blobs"] = blobs
+    return repo, write_manifest(tmp, m), m
+
+
+def write_manifest(tmp, m):
+    path = os.path.join(tmp, "manifest.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(m, fh)
+    return path
 
 
 # repo -> fixture directory (both refs map to the same files unless overridden)
