@@ -44,7 +44,8 @@ import xml.etree.ElementTree as ET
 SCHEMA_VERSION = 1
 LEGS = ("ha", "paas")  # Podman / k3s are out of scope (owner decision 2026-10-16)
 POLICY_MODES = ("lockstep", "range", "independent")
-EXTRACTORS = ("dockerfile_arg", "yaml", "json", "seed_image", "seed_field", "catalog")
+EXTRACTORS = ("dockerfile_arg", "yaml", "json", "seed_image", "seed_field", "catalog",
+              "dockerfile_from", "regex", "pep508", "uv_lock", "json_select", "file_sha256")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -668,6 +669,102 @@ def extract_catalog(text: str, comp_id: str):
             "repository": comp.get("repository"), "source_path": comp.get("source_path")}
 
 
+def extract_dockerfile_from(text: str, stage=None):
+    """Image of a FROM line (ARG defaults substituted): stage = AS name or 0-based index; default the last."""
+    args, froms = {}, []
+
+    def subst(v):
+        return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", lambda mm: args.get(mm.group(1), mm.group(0)), v)
+    for line in text.splitlines():
+        m = re.match(r"^\s*ARG\s+([A-Za-z_][A-Za-z0-9_]*)(?:=(.*))?\s*$", line)
+        if m and m.group(2) is not None:
+            val = m.group(2).strip()
+            if len(val) >= 2 and val[0] == val[-1] and val[0] in "'\"":
+                val = val[1:-1]
+            args.setdefault(m.group(1), subst(val))
+            continue
+        m = re.match(r"^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?\s*$", line, re.I)
+        if m:
+            froms.append((m.group(2), subst(m.group(1))))
+    if not froms:
+        return None
+    if stage is None:
+        return froms[-1][1]
+    if str(stage).isdigit():
+        return froms[int(stage)][1] if int(stage) < len(froms) else None
+    return next((ref for alias, ref in froms if alias == stage), None)
+
+
+def extract_regex(text: str, pattern: str, group=1, unique=True):
+    """A capture group of a multi-line regex; different values for one pin are an error when unique."""
+    vals = [m.group(int(group)) for m in re.finditer(pattern, text, re.M)]
+    if not vals:
+        return None
+    if unique and len(set(vals)) > 1:
+        raise WvtError("regex matched different values: %s" % sorted(set(vals)))
+    return vals[0]
+
+
+def _norm_pkg(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def extract_pep508(text: str, package: str):
+    """The == pin of a package in quoted PEP 508 requirement strings (pyproject.toml); ranges are not pins."""
+    name = "[-_.]+".join(re.escape(p) for p in re.split(r"[-_.]+", package))
+    pat = re.compile(r"[\"']\s*" + name + r"(?:\[[^\]]*\])?\s*==\s*([A-Za-z0-9_.!+*-]+)\s*[\"']", re.I)
+    vals = {m.group(1) for m in pat.finditer(text)}
+    if len(vals) > 1:
+        raise WvtError("%s pinned to different versions: %s" % (package, sorted(vals)))
+    return vals.pop() if vals else None
+
+
+def extract_uv_lock(text: str, package: str, field: str = "version"):
+    """A [[package]] entry of a uv.lock: field version or sdist_sha256 (regex, no tomllib on older runners)."""
+    hits = set()
+    for block in re.split(r"(?m)^\[\[package\]\]\s*$", text)[1:]:
+        m = re.match(r'\s*name = "([^"]+)"\s*\nversion = "([^"]+)"', block)
+        if not m or _norm_pkg(m.group(1)) != _norm_pkg(package):
+            continue
+        if field == "version":
+            hits.add(m.group(2))
+        elif field == "sdist_sha256":
+            mm = re.search(r'^sdist = \{[^}]*hash = "sha256:([0-9a-f]{64})"', block, re.M)
+            if mm:
+                hits.add("sha256:" + mm.group(1))
+        else:
+            raise WvtError("uv_lock: unknown field %r" % field)
+    if len(hits) > 1:
+        raise WvtError("uv_lock has several %s entries for %s: %s" % (field, package, sorted(hits)))
+    return hits.pop() if hits else None
+
+
+def extract_json_select(text: str, where: dict, field: str, extract=None, path=None, unique=True):
+    """One field of the JSON records (a list, optionally at `path`) matching `where`, optionally regex-cut."""
+    data = json.loads(text)
+    if path:
+        data = dig(data, path)
+    if not isinstance(data, list):
+        return None
+    vals = []
+    for el in data:
+        if isinstance(el, dict) and all(el.get(k) == v for k, v in (where or {}).items()):
+            v = dig(el, field)
+            if v is not None and extract:
+                m = re.search(extract, str(v))
+                v = (m.group(1) if m.groups() else m.group(0)) if m else None
+            if v is not None:
+                vals.append(str(v))
+    if unique and len(set(vals)) > 1:
+        raise WvtError("json_select matched different values: %s" % sorted(set(vals)))
+    return vals[0] if vals else None
+
+
+def extract_file_sha256(data):
+    """sha256 of a whole file (in-tree vendored code); bytes, or text as fetched (UTF-8)."""
+    return "sha256:" + hashlib.sha256(data if isinstance(data, bytes) else data.encode("utf-8")).hexdigest()
+
+
 def run_extractor(pin: dict, text: str):
     kind = pin["kind"]
     if kind == "dockerfile_arg":
@@ -682,22 +779,38 @@ def run_extractor(pin: dict, text: str):
         return extract_seed_image(text, pin["record"], pin.get("image_path", "image"))
     if kind == "catalog":
         return extract_catalog(text, pin["id"])
+    if kind == "dockerfile_from":
+        return extract_dockerfile_from(text, pin.get("stage"))
+    if kind == "regex":
+        return extract_regex(text, pin["pattern"], pin.get("group", 1), pin.get("unique", True))
+    if kind == "pep508":
+        return extract_pep508(text, pin["package"])
+    if kind == "uv_lock":
+        return extract_uv_lock(text, pin["package"], pin.get("field", "version"))
+    if kind == "json_select":
+        return extract_json_select(text, pin["where"], pin["field"], pin.get("extract"), pin.get("path"), pin.get("unique", True))
+    if kind == "file_sha256":
+        return extract_file_sha256(text)
     raise WvtError("unknown extractor %r" % kind)
 
 
 def observe(pin: dict, raw) -> dict:
     """Normalise an extracted raw value into {raw, version, digest, tag}."""
-    obs = {"raw": raw, "version": None, "digest": None, "tag": None}
+    obs = {"raw": raw, "version": None, "digest": None, "tag": None, "value": None}
     if raw is None:
         return obs
     if isinstance(raw, dict):  # seed_image / catalog
         obs["raw"] = raw.get("raw") or raw.get("version")
         obs["digest"] = raw.get("digest")
         obs["tag"] = raw.get("tag")
+        obs["value"] = raw.get("tag") or raw.get("version")
         if raw.get("version"):
             obs["version"] = str(raw["version"])
+        if pin.get("tag_as_version") and raw.get("tag"):  # e.g. an OpenDesign shell tag = its core build id
+            obs["version"] = str(raw["tag"])
         return obs
     value = str(raw)
+    obs["value"] = value
     parse = pin.get("parse", "version")
     if parse == "image_ref":
         ref = parse_image_ref(value)
@@ -814,8 +927,8 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
             E("%s must be a mapping" % where)
             continue
         up = p.get("upstream") or {}
-        if not up.get("image"):
-            E("%s.upstream.image missing" % where)
+        if not (up.get("image") or up.get("package") or up.get("source")):
+            E("%s.upstream needs image, package or source" % where)
         pol = p.get("policy") or {}
         mode = pol.get("mode")
         if mode not in POLICY_MODES:
@@ -836,6 +949,9 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
             for arch, d in (tgt.get(grp) or {}).items():
                 if not DIGEST_RE.match(str(d)):
                     E("%s.target.%s.%s is not sha256:<64 hex>" % (where, grp, arch))
+        for iname, iv in (tgt.get("identity") or {}).items():
+            if not isinstance(iv, str) or not iv:
+                E("%s.target.identity.%s must be a non-empty quoted string" % (where, iname))
         if "license_ceiling" in pol:
             try:
                 if tv and not satisfies(tv, pol["license_ceiling"]):
@@ -893,12 +1009,13 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
                 if kind not in EXTRACTORS:
                     E("%s: kind must be one of %s" % (pw, EXTRACTORS))
                 need = {"dockerfile_arg": ["name"], "yaml": ["path"], "json": ["path"], "seed_image": ["record"],
-                        "seed_field": ["record", "field"], "catalog": ["id"]}.get(kind, [])
+                        "seed_field": ["record", "field"], "catalog": ["id"], "regex": ["pattern"], "pep508": ["package"],
+                        "uv_lock": ["package"], "json_select": ["where", "field"]}.get(kind, [])
                 for k in need:
                     if not pin.get(k):
                         E("%s: %s required for kind %s" % (pw, k, kind))
                 cmp_ = pin.get("compare", "version")
-                if cmp_ not in ("version", "index_digest", "info") and not re.match(r"^(platforms|artifacts)\.[A-Za-z0-9_.-]+$", cmp_):
+                if cmp_ not in ("version", "index_digest", "info") and not re.match(r"^(platforms|artifacts|identity)\.[A-Za-z0-9_.-]+$", cmp_):
                     E("%s: compare %r invalid" % (pw, cmp_))
                 elif cmp_ not in ("version", "info") and target_value(p, cmp_) is None:
                     E("%s: compare %s but target has no such digest" % (pw, cmp_))
@@ -984,6 +1101,11 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
             if mir is not None and (not mir.get("dest_name") or target_value(p, str(mir.get("digest") or "")) is None
                                     or str(mir.get("digest")) == "version"):
                 E("%s.mirror needs dest_name and a target digest (index_digest or platforms.<arch>)" % where)
+            fo = legd.get("fanout") or {}
+            if "enabled" in fo and not isinstance(fo["enabled"], bool):
+                E("%s.fanout.enabled must be true or false" % where)
+            if fo.get("enabled") is False and not fo.get("reason"):
+                E("%s.fanout: say why it is off (reason)" % where)
             pkgs = legd.get("package_version") or []
             for pkg in ([pkgs] if isinstance(pkgs, dict) else pkgs):
                 if pkg.get("bump", "none") not in PACKAGE_BUMPS:
@@ -1004,6 +1126,11 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
 # --------------------------------------------------------------------------
 # Policy evaluation
 # --------------------------------------------------------------------------
+
+
+def _id(v: str) -> str:
+    """A git sha / digest shortened for messages; versions and build ids as they are."""
+    return short(v, 12) if len(v) > 20 else v
 
 
 def finding(status, rule, message, **kw):
@@ -1042,61 +1169,73 @@ def evaluate(product: dict, leg: str, pin: dict, obs: dict, today: _dt.date | No
                 "findings": [finding("unknown", "extract", "抽不到釘點（檔案或欄位不存在）")]}
     version = obs.get("version")
     digest_ok = None
-    if compare != "version":
-        want = target_value(product, compare)
-        got = obs.get("digest")
+    if compare.startswith("identity."):
+        # a non-version identity (git commit, build id, upstream version of a fork): equal or not
+        want, got = str(target_value(product, compare)), obs.get("value")
         if got is None:
             return {"status": "unknown", "version": version,
-                    "findings": [finding("unknown", "extract", "釘點沒有 digest，無法比對 %s" % compare)]}
-        digest_ok = (got == want)
-        if not digest_ok:
-            rv, form = resolve_digest(product, got)
-            if rv is not None:
-                if version and version != rv:
+                    "findings": [finding("unknown", "extract", "釘點沒有值，無法比對 %s" % compare)]}
+        same = want.startswith(got) if pin.get("match") == "prefix" and len(got) >= 7 else got == want
+        if not same:
+            c = cmp_versions(got, want)
+            st = "behind" if c is not None and c < 0 else "ahead" if c is not None and c > 0 else "mismatch"
+            findings.append(finding(st, "identity", "%s：%s ≠ 清冊 %s" % (compare, _id(got), _id(want))))
+    else:
+        if compare != "version":
+            want = target_value(product, compare)
+            got = obs.get("digest")
+            if got is None:
+                return {"status": "unknown", "version": version,
+                        "findings": [finding("unknown", "extract", "釘點沒有 digest，無法比對 %s" % compare)]}
+            digest_ok = (got == want)
+            if not digest_ok:
+                rv, form = resolve_digest(product, got)
+                if rv is not None:
+                    if version and version != rv:
+                        findings.append(finding("mismatch", "digest",
+                                                "tag 寫 %s，但 digest 屬於 %s" % (version, rv)))
+                    version = rv
+                    if form != compare:
+                        findings.append(finding("info", "digest_form",
+                                                "digest 形式是 %s（清冊比 %s）" % (form, compare)))
+                else:
                     findings.append(finding("mismatch", "digest",
-                                            "tag 寫 %s，但 digest 屬於 %s" % (version, rv)))
-                version = rv
-                if form != compare:
-                    findings.append(finding("info", "digest_form",
-                                            "digest 形式是 %s（清冊比 %s）" % (form, compare)))
+                                            "digest %s 不是清冊目標或任何已知版本" % short(got)))
             else:
-                findings.append(finding("mismatch", "digest",
-                                        "digest %s 不是清冊目標或任何已知版本" % short(got)))
-        else:
-            if version and cmp_versions(version, tv) != 0:
-                findings.append(finding("mismatch", "digest",
-                                        "tag 寫 %s，但 digest 是清冊目標 %s" % (version, tv)))
-            version = tv
-    # license ceiling (upstream version only — never the package version)
-    if pol.get("license_ceiling") and version and parse_version(version):
-        if not satisfies(version, pol["license_ceiling"]):
-            findings.append(finding("violation", "license_ceiling",
-                                    "%s 超過授權上限 %s" % (version, pol["license_ceiling"])))
-    c = cmp_versions(version, tv) if version else None
-    if c is None and digest_ok is not True:
-        if not any(f["status"] == "mismatch" for f in findings):
-            findings.append(finding("unknown", "version", "無法解析版本 %r" % (version,)))
-    elif mode == "lockstep":
-        if c != 0 or digest_ok is False:
-            st = "behind" if (c is not None and c < 0) else "ahead" if (c is not None and c > 0) else "mismatch"
-            findings.append(finding(st, "digest" if compare != "version" else "lockstep",
-                                    "lockstep：%s ≠ 清冊 %s" % (version, tv)))
-    elif mode == "range":
-        mv = pol.get("min_version")
-        if mv and version and cmp_versions(version, mv) is not None and cmp_versions(version, mv) < 0:
-            findings.append(finding("violation", "min_version", "%s 低於安全下限 %s" % (version, mv)))
-        if c is not None and c < 0:
-            msg = "%s 落後清冊 %s" % (version, tv)
-            since = tgt.get("since")
-            if since:
-                days = _days_between(since, today)
-                limit = pol.get("max_days_behind")
-                msg += "（目標自 %s 起已 %d 天，上限 %s 天）" % (since, days, limit)
-                if isinstance(limit, int) and days > limit:
-                    findings.append(finding("violation", "max_days_behind", "落後超過 %d 天" % limit))
-            findings.append(finding("behind", "range", msg))
-        elif c is not None and c > 0:
-            findings.append(finding("ahead", "range", "%s 比清冊 %s 新，應提 PR 把清冊目標往上調" % (version, tv)))
+                if version and cmp_versions(version, tv) != 0:
+                    findings.append(finding("mismatch", "digest",
+                                            "tag 寫 %s，但 digest 是清冊目標 %s" % (version, tv)))
+                version = tv
+        # license ceiling (upstream version only — never the package version)
+        if pol.get("license_ceiling") and version and parse_version(version):
+            if not satisfies(version, pol["license_ceiling"]):
+                findings.append(finding("violation", "license_ceiling",
+                                        "%s 超過授權上限 %s" % (version, pol["license_ceiling"])))
+        c = cmp_versions(version, tv) if version else None
+        if c is None and digest_ok is not True:
+            if not any(f["status"] == "mismatch" for f in findings):
+                findings.append(finding("unknown", "version", "無法解析版本 %r" % (version,)))
+        elif mode == "lockstep":
+            if c != 0 or digest_ok is False:
+                st = "behind" if (c is not None and c < 0) else "ahead" if (c is not None and c > 0) else "mismatch"
+                findings.append(finding(st, "digest" if compare != "version" else "lockstep",
+                                        "lockstep：%s ≠ 清冊 %s" % (version, tv)))
+        elif mode == "range":
+            mv = pol.get("min_version")
+            if mv and version and cmp_versions(version, mv) is not None and cmp_versions(version, mv) < 0:
+                findings.append(finding("violation", "min_version", "%s 低於安全下限 %s" % (version, mv)))
+            if c is not None and c < 0:
+                msg = "%s 落後清冊 %s" % (version, tv)
+                since = tgt.get("since")
+                if since:
+                    days = _days_between(since, today)
+                    limit = pol.get("max_days_behind")
+                    msg += "（目標自 %s 起已 %d 天，上限 %s 天）" % (since, days, limit)
+                    if isinstance(limit, int) and days > limit:
+                        findings.append(finding("violation", "max_days_behind", "落後超過 %d 天" % limit))
+                findings.append(finding("behind", "range", msg))
+            elif c is not None and c > 0:
+                findings.append(finding("ahead", "range", "%s 比清冊 %s 新，應提 PR 把清冊目標往上調" % (version, tv)))
     # exceptions
     for ex in active_exceptions(product, leg, today, pin.get("id")):
         if ex["expired"]:
@@ -1296,7 +1435,11 @@ def check_repo(m: dict, leg: str, repo_dir: str, repo: str | None, today, produc
                                        "findings": [finding("unknown", "extract", "找不到 %s" % pin["file"])]}))
                 continue
             try:
-                obs = observe(pin, run_extractor(pin, _read(path)))
+                if pin["kind"] == "file_sha256":  # the bytes: a text read would translate line endings
+                    with open(path, "rb") as fh:
+                        obs = observe(pin, run_extractor(pin, fh.read()))
+                else:
+                    obs = observe(pin, run_extractor(pin, _read(path)))
             except Exception as exc:  # parse error in the leg file
                 rows.append((pin, {"status": "unknown", "version": None,
                                    "findings": [finding("unknown", "extract", "解析失敗：%s" % exc)]}))
@@ -1774,10 +1917,13 @@ def render_markdown(m: dict, rep: dict) -> str:
             extra.append("下限 %s、最多落後 %s 天" % (pol.get("min_version"), pol.get("max_days_behind")))
         cells = []
         for leg in LEGS:
+            if leg not in (p.get("legs") or {}):
+                cells.append("—（沒有這一邊）")
+                continue
             rs = [r for r in rep["rows"] if r["product"] == pname and r["leg"] == leg and r["compare"] != "info"]
             st = worst([r["status"] for r in rs]) if rs else "unknown"
-            vers = sorted({r["version"] for r in rs if r.get("version") and r["pin"] not in ("shared_files", "shared_source")},
-                          key=lambda v: parse_version(v) or (0,))
+            vers = sorted({r["version"] for r in rs if r.get("version") and parse_version(r["version"])
+                           and r["pin"] not in ("shared_files", "shared_source")}, key=parse_version)
             cells.append("%s %s" % (STATUS_LABELS[st], " / ".join(vers) or ""))
         allst = worst([r["status"] for r in rep["rows"] if r["product"] == pname and r["compare"] != "info"] or ["unknown"])
         exc = [e for e in rep["exceptions"] if e["product"] == pname]

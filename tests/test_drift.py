@@ -4,6 +4,7 @@ import unittest
 from helpers import FakeFetcher, LITELLM_MAIN_BLOBS, fixture, manifest, wvt
 
 TODAY = dt.date(2026, 10, 16)
+ORIGINAL = ("emqx", "litellm", "n8n")
 
 
 def rows(rep, product, leg=None, pin=None):
@@ -58,7 +59,10 @@ class DriftTest(unittest.TestCase):
                             "20261015.2140@sha256:371dd463f02e8c35a4bc5aaf9855fc4cfec1babab97e5a02a1e31923a2ec8f5a")
         repo, path = "gitea:odoo-addons/woow_paas_platform", "src/data/cloud_app_templates.xml"
         rep = self.collect(overrides={(repo, path, "v18.0.1.0.242"): seed, (repo, path, "develop"): seed})
-        self.assertFalse(rep["drift"], [(r["product"], r["pin"], r["status"]) for r in rep["rows"] if r["status"] in wvt.DRIFT_STATUSES])
+        # the phase-3 products have no fixtures here: judge the three original products
+        dirty = [(r["product"], r["pin"], r["status"]) for r in rep["rows"]
+                 if r["product"] in ORIGINAL and r["status"] in wvt.DRIFT_STATUSES]
+        self.assertEqual(dirty, [])
 
     def test_github_unreachable_is_reported_not_crashing(self):
         rep = self.collect(unreachable={"github"})

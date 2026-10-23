@@ -408,7 +408,8 @@ class FanoutTest(unittest.TestCase):
         self.assertEqual((got["tag"], got["digest"]), ("20261101.0101", N8N_244["platforms"]["amd64"]))
 
     def test_aligned_and_ahead_sides_are_left_alone(self):
-        self.assertEqual([p for p in wvtbot.plan_fanout(manifest(), FakeFetcher(), TODAY, "ha")], [])
+        ours = lambda plans: [p for p in plans if p["product"] in ("emqx", "litellm", "n8n")]  # noqa: E731
+        self.assertEqual(ours(wvtbot.plan_fanout(manifest(), FakeFetcher(), TODAY, "ha")), [])
         older = manifest()["products"]["n8n"]["known_versions"][0]
         m = self.moved(target={"version": "2.38.0", "since": "2026-10-24", "index_digest": older["index_digest"], "platforms": older["platforms"]})
         self.assertEqual([p for p in wvtbot.plan_fanout(m, FakeFetcher(), TODAY, "ha") if p["product"] == "n8n"], [])
