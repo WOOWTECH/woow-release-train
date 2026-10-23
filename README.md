@@ -230,6 +230,6 @@ jobs:
 ## 已知限制
 
 - PaaS「已部署」欄目前是手動快照（`observations`，有日期，超過 14 天會警告）。改由平台自動回報列在後續工作，第 1 期仍是手動。
-- 正式站平台版只寫在 CD values 的註解裡（`Built from addon_ref v18.0.1.0.NNN`）。讀不到時報告會註明，並退回只比 develop。
+- 正式站平台版只寫在 CD values 的註解裡（例如 `# 2026-10-22: addon .253（v18.0.1.0.253 → …）`）。`wvt` 取最上面一筆發版註記，並要求該註記寫到 `image.tag` 才算交叉驗證；驗不到會在報告備註，完全讀不到時退回只比 develop。
 - JCR 需要憑證，本 repo 不讀 JCR。PaaS 的 digest 身分靠 seed 裡的 `tag@sha256`：JCR 鏡像用 `--preserve-digests`，與上游 digest 逐字相同。
 - YAML 子集不支援 anchor、alias、tag、多文件，也不支援「折疊字串裡再縮排」這類罕見寫法。各邊的 Chart.yaml、values.yaml、config.yaml 已驗證可正確解析。

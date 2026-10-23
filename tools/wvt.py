@@ -1474,21 +1474,23 @@ class Fetcher:
         return None if data is None else data.get("total_commits")
 
 
+_ADDON_TAG = re.compile(r"\b(v\d+\.0\.\d+\.\d+\.\d+)\b")
+# a comment line that starts another release note (or a section) ends the note before it
+_NOTE_START = re.compile(r"^\s*#\s*(\d{4}-\d{2}-\d{2}\b|\d{3}:|前一顆|── )")
+
+
 def extract_addon_ref(values_text: str):
     """Production platform addon tag from paas-app-bundle-cd values-prod.yaml.
 
-    The pinned image is structured (image.tag/digest) but the platform release it
-    was built from is only recorded in the comment above it ("Built from addon_ref
-    v18.0.1.0.242"). Take the first (topmost = newest) platform tag mentioned in the
-    '── image ──' block: release notes are prepended, so an older "addon_ref v…" line
-    further down must not win over a newer "243: v18.0.1.0.243" line above it.
+    The pinned image is structured (image.tag/digest) but the platform release it was built
+    from is only recorded in the comments above `image:` ("243: v18.0.1.0.243 / …",
+    "# 2026-10-22: addon .253（v18.0.1.0.253 → …）"). Notes are prepended — first inside the
+    '── image ──' block, since .253 at the top of the file — so the newest note names its tag
+    first. A tag whose note also names the pinned image tag wins (cross_checked); without
+    such a note the first mention does.
     """
     lines = values_text.splitlines()
-    start = next((i for i, ln in enumerate(lines) if "── image ──" in ln), 0)
-    end = next((i for i, ln in enumerate(lines) if i > start and re.match(r"^image:", ln)), len(lines))
-    block = "\n".join(lines[start:end])
-    m = re.search(r"\b(v\d+\.0\.\d+\.\d+\.\d+)\b", block)
-    tag = m.group(1) if m else None
+    end = next((i for i, ln in enumerate(lines) if re.match(r"^image:", ln)), len(lines))
     img = {}
     for ln in lines[end + 1: end + 12]:
         if ln and not ln.startswith(" "):
@@ -1496,7 +1498,19 @@ def extract_addon_ref(values_text: str):
         mm = re.match(r'^\s+(tag|digest):\s*["\']?([^"\'\s]+)', ln)
         if mm:
             img.setdefault(mm.group(1), mm.group(2))
-    return {"tag": tag, "image_tag": img.get("tag"), "image_digest": img.get("digest")}
+    comments = [ln for ln in lines[:end] if ln.lstrip().startswith("#")]
+    cands = [(k, m.group(1)) for k, m in ((k, _ADDON_TAG.search(ln)) for k, ln in enumerate(comments)) if m]
+    tag, checked = (cands[0][1] if cands else None), False
+    for k, t in cands if img.get("tag") else []:
+        note = [comments[k]]
+        for ln in comments[k + 1:]:
+            if _NOTE_START.match(ln) or _ADDON_TAG.search(ln):
+                break
+            note.append(ln)
+        if any(img["tag"] in ln for ln in note):
+            tag, checked = t, True
+            break
+    return {"tag": tag, "image_tag": img.get("tag"), "image_digest": img.get("digest"), "cross_checked": checked}
 
 
 def resolve_ref(ref: str, ctx: dict):
@@ -1518,6 +1532,9 @@ def collect_drift(m: dict, f: Fetcher, today: _dt.date | None = None) -> dict:
             ctx[name + "_info"] = info
             if not info["tag"]:
                 notes.append("無法從 %s 判讀正式站平台版" % src["file"])
+            elif not info["cross_checked"]:
+                notes.append("正式站平台版 %s 取自 %s 最上面的發版註記，該註記沒有寫到 image tag %s，無法交叉驗證"
+                             % (info["tag"], src["file"], info["image_tag"]))
         except WvtError as exc:
             notes.append("讀不到 %s:%s（%s）" % (src["repo"], src["file"], exc))
             ctx[name] = None

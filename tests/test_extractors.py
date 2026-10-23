@@ -95,6 +95,27 @@ class CatalogAndCdTest(unittest.TestCase):
         info = wvt.extract_addon_ref(text)
         self.assertEqual(info["tag"], "v18.0.1.0.243")
         self.assertEqual(info["image_tag"], "20261016.0331")
+        self.assertFalse(info["cross_checked"])
+
+    def test_addon_ref_note_at_top_of_file(self):
+        # since .253 the newest note sits above the '── image ──' block (values-prod.yaml at cd 5427f9a)
+        text = ("# 2026-10-22: addon .253（v18.0.1.0.253 → a525d9cc；release #1930）：quota 系列\n"
+                "# 官方 image：build run 25492：clone＝image＝18.0.1.0.253，push 輸出 `20261022.0907: digest: sha256:fde64ab8…`\n"
+                "# 前一顆 .252：20261020.1557@sha256:705da5c2\n"
+                "# paas-odoo-platform — prod 平台 Odoo 的 values。\n"
+                "profile: platform\n"
+                "# ── image ──\n# 249: v18.0.1.0.249 / source b47af288\n"
+                "image:\n  tag: \"20261022.0907\"\n  digest: \"sha256:fde64ab8\"\n")
+        info = wvt.extract_addon_ref(text)
+        self.assertEqual((info["tag"], info["cross_checked"]), ("v18.0.1.0.253", True))
+
+    def test_addon_ref_note_naming_the_image_beats_a_newer_plan(self):
+        text = ("# 2026-10-25: 預計 v18.0.1.0.256（尚未部署）\n# ── image ──\n"
+                "# 253: v18.0.1.0.253 / build run 25492, pushed 20261022.0907\n"
+                "# 252: v18.0.1.0.252 / pushed 20261020.1557\n"
+                "image:\n  tag: \"20261022.0907\"\n")
+        info = wvt.extract_addon_ref(text)
+        self.assertEqual((info["tag"], info["cross_checked"]), ("v18.0.1.0.253", True))
 
 
 class ImageRefTest(unittest.TestCase):
