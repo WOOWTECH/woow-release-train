@@ -47,8 +47,8 @@ class CheckCliTest(unittest.TestCase):
         rc, out = run("check", "--leg", "paas", "--repo-dir", os.path.join(FIX, "paas_platform"),
                       "--repo", "gitea:odoo-addons/woow_paas_platform")
         self.assertEqual(rc, 0)
-        self.assertIn("落後", out)
-        self.assertIn("1 項警告", out)
+        self.assertIn("2.38.0 落後清冊 2.43.6", out)
+        self.assertIn("通過", out)
 
     def test_fail_on_none_is_report_only(self):
         rc, out = run("check", "--leg", "paas", "--repo-dir", os.path.join(FIX, "paas_platform"),

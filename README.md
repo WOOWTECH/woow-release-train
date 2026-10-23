@@ -23,8 +23,8 @@ HA 和 PaaS 各自升版，結果常常不一致。例如 n8n 在 HA 已是 2.43
 | 真相來源 | 單一清冊 `woow-versions.yaml`，HA 與 PaaS 都對齊它 |
 | 放哪裡 | Gitea 為主，GitHub 公開鏡像（Gitea Actions＋deploy key 推送） |
 | 範圍 | 只管 HA 與 PaaS。Podman、k3s 不納入，清冊裡也不建模 |
-| lockstep（兩邊必須同一顆上游 digest） | EMQX、LiteLLM；之後加 OpenDesign、code-server |
-| range（允許落後，但有下限與天數上限） | n8n；之後加 Hermes、Omnigent、Headscale、Tailscale |
+| lockstep（兩邊必須同一顆上游 digest） | EMQX、LiteLLM、OpenDesign、MCP servers；之後加 code-server |
+| range（允許落後，但有下限與天數上限） | n8n、Hermes、MCP Python SDK；之後加 Omnigent、Headscale、Tailscale |
 | 自動化程度 | 機器人只開 PR、跑測試；合併與發版一律由人做 |
 | Gitea | 機器人**永遠不合併** Gitea PR，也**不簽** paas-odoo-ci 的 `/approve` |
 | 第 0 期 | 只放 EMQX、LiteLLM、n8n 三個產品，只出報告 |
@@ -85,9 +85,16 @@ probes: { api.github.com: https://api.github.com/rate_limit }   # 只測連線�
 | `seed_image` | Odoo seed XML：`<record id=...>` 的 `helm_default_values` → `image.repository/tag` | `record` |
 | `seed_field` | Odoo seed XML 的某個 `<field>` | `record`、`field` |
 | `catalog` | Woow_HA_App_Store `.addon-sync/catalog.json` 的元件 | `id` |
+| `dockerfile_from` | Dockerfile 的 `FROM` 映像（代換 ARG 預設值；`stage`＝AS 名稱或序號，預設最後一個） | — |
+| `regex` | 任一文字檔的擷取群組（env 檔、Python 常數、文件；`group`、`unique`） | `pattern` |
+| `pep508` | `pyproject.toml` 等的 `名稱==版本`（範圍不算釘點） | `package` |
+| `uv_lock` | `uv.lock` 的 `[[package]]`（`field`：`version` 或 `sdist_sha256`） | `package` |
+| `json_select` | JSON 陣列裡符合 `where` 的紀錄的欄位（`extract` 正規表示式、`path`） | `where`、`field` |
+| `file_sha256` | 整個檔案的 sha256（vendor 進來的程式碼） | — |
 
 - `parse`：`version`（預設）、`image_ref`（`repo:tag@sha256:…`）或 `digest`（純 sha256）。
-- `compare`：`version`、`index_digest`、`platforms.<arch>`、`artifacts.<名稱>`，或 `info`（只列參考，不比較）。
+- `compare`：`version`、`index_digest`、`platforms.<arch>`、`artifacts.<名稱>`、`identity.<名稱>`（`target.identity` 裡的 commit、build id、fork 的上游版本），或 `info`（只列參考，不比較）。
+- `match: prefix`：identity 允許短 sha（至少 7 碼）；`tag_as_version: true`：seed 映像的 tag 就是版本（例如 OpenDesign 外殼 tag＝core build id）。
 - `ref`：分支或 tag。`$prod_platform` 代表正式站平台版；`also_refs: [develop]` 會同時比 develop。
 
 **只比上游身分。** add-on 版號、chart 版號、JCR 時間戳 tag 都是各邊自己的包裝，只放在 `package_version` 列參考。例如 HA EMQX 的 add-on 標 5.9.1，實際包的是上游 5.8.9；授權上限 `<5.9.0` 只看 5.8.9。
@@ -249,7 +256,7 @@ python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode
 | **0**（10-16 上線） | 清冊列 EMQX、LiteLLM、n8n 的現況；drift 報告＋追蹤 issue；GitHub 鏡像 | 什麼都不擋（只擋本 repo 自己的 CI） |
 | **1（現在）** | 各邊 CI 跑 `wvt check`（HA：各 repo 的 `release-train.yml` 呼叫可重用 workflow，Store 以 `required_workflows` 把關；PaaS：charts、woow_paas_platform、paas-odoo-ci 各一支） | 只開兩條硬規則：**EMQX 授權上限**；**LiteLLM base digest＋外掛 lock commit／blob（含複本內容）必須等於清冊**。讀不到釘點一律擋。其他一律警告 |
 | **2** | 機器人：某一邊先升 → 清冊 PR；清冊合併 → 扇出各邊 PR、dispatch mirror-image、開 seed／charts PR（`tools/wvtbot.py`） | 不擋；只產生 PR |
-| **3** | 擴大到 OpenDesign、code-server（lockstep），Hermes、Omnigent、Headscale、Tailscale（range），以及 pi-agent、Nextcloud、Odoo、MCP | range 的落後天數改成硬擋，配 SLA |
+| **3**（10-24 開始） | 先加 Hermes（range）、OpenDesign core（lockstep）、MCP servers：n8n、Odoo、LiteLLM、Hermes、EMQX、Nextcloud（lockstep）＋MCP Python SDK（range，下限 1.30.0）。之後 code-server、Omnigent、Headscale、Tailscale、pi-agent、Nextcloud、Odoo | 新產品先只觀測：`hard_rules` 留空，OpenDesign 與 MCP 的 fanout 關閉（要人工匯入 core、重算 patch）。穩定後再決定硬規則與 SLA |
 
 ## 誰核可什麼
 

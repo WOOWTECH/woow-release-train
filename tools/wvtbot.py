@@ -467,8 +467,43 @@ def write_json_path(text: str, path: str, value: str) -> str:
     return json.dumps(data, indent=style[0], ensure_ascii=style[1]) + style[2]
 
 
+def write_dockerfile_from(text: str, stage, value: str) -> str:
+    """Rewrite the image of one FROM line (same stage choice as wvt's extractor); ${ARG} lines are refused."""
+    out = text.splitlines(keepends=True)
+    froms = [(i, m) for i, m in ((i, re.match(r"^(\s*FROM\s+(?:--platform=\S+\s+)?)(\S+)((?:\s+AS\s+(\S+))?\s*)$", ln.rstrip("\r\n"), re.I))
+                                 for i, ln in enumerate(out)) if m]
+    if not froms:
+        raise WvtError("no FROM line")
+    if stage is None:
+        i, m = froms[-1]
+    elif str(stage).isdigit():
+        i, m = froms[int(stage)]
+    else:
+        i, m = next((x for x in froms if x[1].group(4) == stage), (None, None))
+        if m is None:
+            raise WvtError("FROM … AS %s not found" % stage)
+    if "$" in m.group(2):
+        raise WvtError("FROM %s comes from an ARG: pin the ARG instead" % m.group(2))
+    line = out[i]
+    body = line.rstrip("\r\n")
+    out[i] = m.group(1) + value + m.group(3) + line[len(body):]
+    return "".join(out)
+
+
+def write_regex(text: str, pattern: str, value: str, group=1) -> str:
+    """Replace the capture group at every match (wvt's extractor requires them to agree)."""
+    rx = re.compile(pattern, re.M)
+    if not rx.search(text):
+        raise WvtError("regex %s does not match" % pattern)
+    return rx.sub(lambda mm: mm.group(0)[:mm.start(int(group)) - mm.start(0)] + value + mm.group(0)[mm.end(int(group)) - mm.start(0):], text)
+
+
 def write_pin(text: str, pin: dict, value: str) -> str:
     kind = pin["kind"]
+    if kind == "dockerfile_from":
+        return write_dockerfile_from(text, pin.get("stage"), value)
+    if kind == "regex":
+        return write_regex(text, pin["pattern"], value, pin.get("group", 1))
     if kind == "dockerfile_arg":
         return write_dockerfile_arg(text, pin["name"], value)
     if kind == "yaml":
@@ -487,16 +522,20 @@ def bump_patch(v: str) -> str:
     return "%s%s.%s.%d" % (m.group(1), m.group(2), m.group(3), int(m.group(4)) + 1)
 
 
+def _in_jcr(repository) -> bool:
+    return str(repository or "").startswith("jcr-prod.woowtech.io/")
+
+
 def new_image_ref(old: str, version: str, digest: str | None, jcr_tag: str | None = None) -> str:
     """Same repository; a version tag follows the manifest (v-style kept), a JCR timestamp tag
     becomes the new mirror tag, and the digest is the manifest's."""
     ref = wvt.parse_image_ref(old)
     tag = ref["tag"]
-    if tag and JCR_TAG_RE.match(tag):
+    if tag and JCR_TAG_RE.match(tag) and _in_jcr(ref["repository"]):
         if not jcr_tag:
             raise WvtError("%s: needs the JCR mirror tag" % old)
         tag = jcr_tag
-    elif tag and wvt.parse_version(tag) is not None:
+    elif tag and wvt.parse_version(tag) is not None:  # incl. a build id such as 20261015.0617
         tag = ("v" if tag[:1] in "vV" else "") + version
     out = ref["repository"] or ""
     if tag:
@@ -899,8 +938,7 @@ def needs_mirror(pin: dict, obs: dict) -> bool:
     if pin.get("mirror") or pin["kind"] == "seed_image":
         return True
     if pin.get("parse") == "image_ref":
-        ref = wvt.parse_image_ref(str(obs.get("raw") or ""))
-        return (ref["repository"] or "").startswith("jcr-prod.woowtech.io/") or bool(ref["tag"] and JCR_TAG_RE.match(ref["tag"]))
+        return _in_jcr(wvt.parse_image_ref(str(obs.get("raw") or ""))["repository"])
     return False
 
 
@@ -938,6 +976,7 @@ def plan_fanout(m: dict, f, today, leg: str, only=None, mirrors=None):
             continue
         legd = (p.get("legs") or {}).get(leg) or {}
         mode = (p.get("policy") or {}).get("mode")
+        fo = legd.get("fanout") or {}
         for (repo, ref), pins in leg_repos(p, leg).items():
             plan = {"product": pname, "leg": leg, "repo": repo, "base": ref, "files": {}, "changes": [],
                     "package": [], "shared": None, "blocked": None, "needs_mirror": False}
@@ -961,6 +1000,9 @@ def plan_fanout(m: dict, f, today, leg: str, only=None, mirrors=None):
                     sts = {x["status"] for x in res["findings"]}
                     if "ahead" in sts or not sts & ({"behind"} if mode == "range" else {"behind", "mismatch"}):
                         continue
+                    if fo.get("enabled") is False:
+                        plan["blocked"] = "fanout 關閉：%s（%s %s）" % (fo.get("reason") or "需要人工", pin["id"], res.get("version") or obs.get("value"))
+                        break
                     if needs_mirror(pin, obs):
                         plan["needs_mirror"] = True
                         if not jcr:
