@@ -116,3 +116,17 @@ class FakeFetcher(wvt.Fetcher):
 
     def commits_between(self, repo, base, head):
         return self.behind
+
+    # wvtbot.BotFetcher extras
+    def read_bytes(self, repo, path, ref):
+        key = (repo, path, ref)
+        if key in self.bytes_overrides:
+            return self.bytes_overrides[key]
+        text = self.read(repo, path, ref)
+        return None if text is None else text.encode("utf-8")
+
+    def last_commit(self, repo, path, ref):
+        return self.head_commit
+
+    bytes_overrides = {}
+    head_commit = "d3cd6898b29a9e094fd616bc151399c9884e5c19"
