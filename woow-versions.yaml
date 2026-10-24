@@ -578,9 +578,9 @@ products:
     upstream: {package: "npm:n8n-mcp", source: "github:czlonkowski/n8n-mcp"}
     policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
     target:
-      version: "2.92.1"
-      since: "2026-10-06"           # npm 發佈日
-      verified: "2026-10-23T22:41Z registry.npmjs.org/n8n-mcp（2.92.1 integrity sha512-cnNxuA/…；latest 已是 2.96.2）"
+      version: "2.96.2"
+      since: "2026-10-23"           # npm 發佈日
+      verified: "2026-10-24 registry.npmjs.org/n8n-mcp latest＝2.96.2（engines node ^22.23.4 || ^24.22.1 || >=26.12.1）"
     legs:
       ha:
         fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
@@ -597,7 +597,8 @@ products:
         repo: "gitea:WOOWTECH/woow-mcp-server"
         ref: main
         pins:
-          - {id: image-arg, label: Dockerfile N8N_MCP_VERSION, file: apps/n8n/Dockerfile, kind: dockerfile_arg, name: N8N_MCP_VERSION, compare: version}
+          - {id: package-json, label: upstream-dependencies package.json 相依, file: apps/n8n/upstream-dependencies/package.json, kind: json, path: dependencies.n8n-mcp, compare: version}
+          - {id: package-lock, label: upstream-dependencies package-lock.json 鎖定, file: apps/n8n/upstream-dependencies/package-lock.json, kind: json, path: "packages.node_modules/n8n-mcp.version", compare: version}
           - {id: patch-guard-result, label: isError patch 的版本守線, file: apps/n8n/n8n_mcp_admin/upstream_result_patch.py, kind: regex, pattern: '^VERSION = "([^"]+)"', compare: version}
           - {id: patch-guard-direct, label: direct inputs patch 的版本守線, file: apps/n8n/n8n_mcp_admin/upstream_direct_patch.py, kind: regex, pattern: '^VERSION = "([^"]+)"', compare: version}
           - id: seed-wrapper
@@ -610,11 +611,9 @@ products:
             record: cloud_app_mcp_n8n
             compare: info
     exceptions: []
-    # 建議例外（負責人核准後再解除註解）：
-    #   - {leg: ha, what: "n8n-mcp 2.91.0→2.92.1", reason: "HA patch digest（fix_test_run_error_messages.py PINNED／PATCHED）與 tool_snapshot 需對 2.92.1 重審", approved_by: "<負責人>", expires: "2026-11-07", waives: [behind]}
     notes:
-      - "HA 釘 2.91.0（package.json:7、package-lock.json:1163），PaaS 釘 2.92.1（Dockerfile:27）。兩邊都對該版 dist/ 檔做位元組 patch 並在不符時拒絕啟動，升版要兩邊各自重算 digest。"
-      - "n8n-mcp 2.91.0／2.92.1 的 npm 相依都釘 @modelcontextprotocol/sdk 1.30.0；HA 用 overrides 升到 1.31.0（GHSA-6qxp-vccf-f47h），PaaS 沒有。"
+      - "2026-10-24 兩邊一起升 2.96.2（PaaS woow-mcp-server #77＝4f09ba1 已合併、平台 develop seed #1975 已改釘；HA Woow_ha_mcp_addons 0.3.2＝PR #17，排在 0.3.1 之後）。兩邊都對該版 dist/ 檔做位元組 patch 並在不符時拒絕啟動，升版要兩邊各自重算 digest。PaaS 版本釘點從 Dockerfile ARG 移到 apps/n8n/upstream-dependencies/。"
+      - "n8n-mcp 宣告 @modelcontextprotocol/sdk 1.30.0，兩邊都用 overrides 升到 1.32.2。2.96.2 要求 Node ^22.23.4：兩邊 Node 一起升 22.23.4（node:22.23.4 映像，同一個 index digest）。"
 
   mcp-odoo:
     display_name: Odoo MCP（odoo-mcp）
@@ -699,19 +698,21 @@ products:
             compare: info
     exceptions: []
     notes:
-      - "包裝差異（不比較）：HA 另改 lifespan.py（scoped DNS-pinned HTTPX）；fastmcp HA 3.4.5、PaaS 3.4.8。"
+      - "包裝差異（不比較）：HA 另改 lifespan.py（scoped DNS-pinned HTTPX）；fastmcp 兩邊都升到 3.x 最新 3.4.11（2026-10-24）。"
 
   mcp-hermes:
     display_name: Hermes MCP（hermes_mcp_server）
     upstream: {source: "gitea:WOOWTECH/woow-mcp-server"}   # apps/hermes 在 PaaS repo 內開發；HA 取某個 commit 的快照
     policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
     target:
-      version: "2026.10.18"         # 無語意化版號：用最後修改 server.py 的 woow-mcp-server commit 日期（77e3a75）
-      since: "2026-10-18"
-      artifacts: {server_py: "sha256:9fe2b8ef398161ad3ac73e24beab24c5dd259ce085c9593cf65459c283203bf1"}   # apps/hermes/hermes_mcp_server/server.py @main 5526e865
-      verified: "2026-10-24 本機 sha256sum（Gitea 與 GitHub 鏡像 main 同為 5526e865）"
+      version: "2026.10.23.2"       # 無語意化版號：最後修改 server.py 的 woow-mcp-server commit 日期＋當日序號（c4c1e69）
+      since: "2026-10-23"
+      artifacts: {server_py: "sha256:46257acee37e1e900d97e11643f51e6c6fde4353bcee2407f6dd025ff8f21a9f"}   # apps/hermes/hermes_mcp_server/server.py @main a5db051（c4c1e69 之後未變）
+      verified: "2026-10-24 本機 sha256sum（Gitea main a5db051）"
     known_versions:
-      - {version: "2026.8.11", artifacts: {server_py: "sha256:e1c3f7be4de0302fafb85848641d89a43e83565afa844da9f813f10a718c25a6"}}   # woow-mcp-server 614ae663：HA 現用快照
+      - {version: "2026.10.23.1", artifacts: {server_py: "sha256:46cd8637447ceb16545238bdf6e2fc122503b09a33c93ffa896f197e88ffcfc5"}}   # 29c383f：HA 0.3.0 快照
+      - {version: "2026.10.18", artifacts: {server_py: "sha256:9fe2b8ef398161ad3ac73e24beab24c5dd259ce085c9593cf65459c283203bf1"}}   # 77e3a75：10-18 商用驗收整合包
+      - {version: "2026.8.11", artifacts: {server_py: "sha256:e1c3f7be4de0302fafb85848641d89a43e83565afa844da9f813f10a718c25a6"}}   # 614ae663：HA 0.2.x 快照
     legs:
       ha:
         fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
@@ -739,7 +740,8 @@ products:
             compare: info
     exceptions: []
     notes:
-      - "HA 快照落後 8 個 hermes commit（10-17／18 的安全與功能修補）；HA PR #6／#7／#8／#12 與 woow-mcp-server 分支 feat/mcp-parity-20261023 進行中，合併後 HA 會多 errors.py、guards.py，runtime-sources.json 的 source 格式也會變（woow-mcp-server:<sha>+<branch>）。"
+      - "HA 0.3.0 取 29c383f 的快照（含 10-17／18 安全與功能修補，舊 PR #6／#7／#8 已涵蓋）；0.3.2 的來源紀錄對齊 main（c4c1e69：巢狀設定先驗證、寫入後讀回；HA 檔案內容 0.3.0 起已含）。"
+      - "包裝差異（不比較）：HA 允許區網 MCP 伺服器、擋 metadata／link-local／迴路位址（AI-HMCP-002-2）；PaaS 用 strict SSRF（另擋私有網段）。"
 
   mcp-emqx:
     display_name: EMQX MCP（Woow_emqx_mcp_server）
@@ -813,7 +815,7 @@ products:
     target:
       version: "1.30.0"
       since: "2026-10-16"           # PaaS 採用日（PyPI 發佈 2026-09-07）
-      verified: "2026-10-23 PyPI：1.x 最新 1.30.0；另有 2.x 線（最新 2.3.0），本清冊不追"
+      verified: "2026-10-24 PyPI：1.x 最新仍是 1.30.0；2.x 線最新 2.3.0（大改版，兩邊一起另案評估）"
     legs:
       ha:
         fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
@@ -825,6 +827,7 @@ products:
           - {id: hermes-child, file: apps/hermes/pyproject.toml, kind: pep508, package: mcp, compare: version}
           - {id: emqx-child, file: apps/emqx/pyproject.toml, kind: pep508, package: mcp, compare: version}
           - {id: nextcloud-child, file: apps/nextcloud/pyproject.toml, kind: pep508, package: mcp, compare: version}
+          - {id: opendesign-builtin, label: OpenDesign add-on 內建 MCP, repo: "github:WOOWTECH/Woow_ha_opendesign_add_on", ref: main, file: mcp-runtime/requirements/child.in, kind: regex, pattern: '^mcp==([0-9A-Za-z.!+-]+)\s*$', compare: version}
       paas:
         fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
         repo: "gitea:WOOWTECH/woow-mcp-server"
@@ -833,7 +836,8 @@ products:
           - {id: uv-lock, label: 根 uv.lock 鎖定（九個 app 共用）, file: uv.lock, kind: uv_lock, package: mcp, compare: version}
     exceptions: []
     notes:
-      - "n8n child 另有 npm @modelcontextprotocol/sdk：HA overrides 1.31.0、PaaS 隨 n8n-mcp 的 1.30.0（GHSA-6qxp-vccf-f47h，HA 判斷 OAuth client 部分該 child 不用），未納入。"
+      - "n8n child 另有 npm @modelcontextprotocol/sdk：兩邊 overrides 都是 1.32.2（見 mcp-n8n），未納入本項。"
+      - "OpenDesign add-on 的內建 MCP（mcp-runtime/requirements）也用這個 SDK，2026-10-24 納入（0.2.3 是 1.28.1，0.2.4 起 1.30.0，2026-10-24 發佈）。"
 
 # 線上實際部署的手動快照（非真相來源，只供 drift 報告參考；第 1 期起改由 operator 回報）。
 # 本 repo 有公開鏡像：只寫數量與版本，不寫租戶的服務 ID／工作區名稱。
