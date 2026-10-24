@@ -1110,8 +1110,19 @@ def sync_shared(sf, consumer, lock_text, f, today):
     new_lock["synced_at"] = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     new_lock["files"] = meta
     files[consumer["lock"]] = json.dumps(new_lock, indent=2) + "\n"  # same as the HA repo's tools/sync-woow-plugin.sh
+    chart_version = new_lock["source"].get("chart_version") or ""
+    for st in consumer.get("stamps") or []:  # source marks the consumer keeps next to its lock (labels, build info)
+        value = st["value"].format(chart_version=chart_version, commit=src["commit"], commit7=src["commit"][:7])
+        text = files.get(st["file"]) or f.read(consumer["repo"], st["file"], consumer.get("ref", "main"))
+        if text is None:
+            raise WvtError("%s 沒有 %s" % (consumer["repo"], st["file"]))
+        if st["kind"] == "regex":
+            files[st["file"]] = write_regex(text, st["pattern"], value, st.get("group", 1))
+        else:
+            files[st["file"]] = write_json_path(text, st["path"], value)
     old_commit = (lock.get("source") or {}).get("commit")
-    return {"files": files, "old_commit": old_commit, "commit": src["commit"], "names": list(src["files"])}
+    return {"files": files, "old_commit": old_commit, "commit": src["commit"], "names": list(src["files"]),
+            "old_names": sorted((lock.get("files") or {}).keys())}
 
 
 def render_fanout(m, plan, manifest_rev, forge_kind):
@@ -1137,6 +1148,8 @@ def render_fanout(m, plan, manifest_rev, forge_kind):
     if plan["shared"]:
         s = plan["shared"]
         b.append("- 共用檔：%s 從清冊 commit `%s` 重新複製（舊 `%s`），lock 一併重寫。" % ("、".join(s["names"]), s["commit"][:10], (s["old_commit"] or "?")[:10]))
+        if sorted(s["names"]) != s.get("old_names", sorted(s["names"])):
+            b.append("- **共用檔清單變了**（%d → %d 個）：本 repo 的同步工具或合約測試若寫死檔名，要在這張 PR 一起改。" % (len(s.get("old_names") or []), len(s["names"])))
     b += ["", "合併前請確認：", "- [ ] 本 repo 的 CI（建置、smoke）全綠；CHANGELOG 把機器人那一行換成實際變更說明",
           "- [ ] 其他寫死這個版本的地方（文件、測試、README）一併更新"]
     if pol.get("downgrade") == "forbidden" or pol.get("upgrade_evidence") == "required":

@@ -442,6 +442,50 @@ class FanoutTest(unittest.TestCase):
         self.assertEqual([x["status"] for x in fs], ["ok"], fs)
 
 
+class StampsTest(unittest.TestCase):
+    def test_resync_rewrites_stamps_and_version_spots(self):
+        names = ["sitecustomize.py", "woow_chatgpt.py", "woow_chatgpt_plugin.py", "woow_usage_limit.py"]
+        contents = {n: ("# %s\n" % n).encode() for n in names}
+        blobs = {n: wvt.git_blob_sha(c) for n, c in contents.items()}
+        head = "b" * 40
+        m = wvtbot.check_manifest_text(wvtbot.set_shared_commit(manifest_text(), "litellm", 0, head, blobs, names), TODAY)
+        lite = m["products"]["litellm"]
+        lite["shared_files"][0]["consumers"][0]["stamps"] = [
+            {"file": "litellm/Dockerfile", "kind": "regex", "pattern": r"io\.woowtech\.woow-plugin\.source=(\S+)",
+             "value": "{chart_version}@{commit}"},
+            {"file": "litellm/rootfs/usr/share/woow-litellm/build-info.json", "kind": "json", "path": "woow_plugin_source",
+             "value": "woow-paas-charts {chart_version}@{commit7}"}]
+        lite["legs"]["ha"]["package_version"] += [
+            {"label": "BUILD_VERSION", "file": "litellm/Dockerfile", "kind": "dockerfile_arg", "name": "BUILD_VERSION", "bump": "patch"},
+            {"label": "build-info", "file": "litellm/rootfs/usr/share/woow-litellm/build-info.json", "kind": "json",
+             "path": "addon_version", "bump": "patch"}]
+        self.assertEqual(wvt.validate_manifest(m, TODAY, expiry=False)[0], [])
+        ha, charts = "github:WOOWTECH/Woow_ha_litellm", "gitea:woow-paas/woow-paas-charts"
+        dockerfile = fixture("ha_litellm", "litellm", "Dockerfile") + (
+            "ARG BUILD_VERSION=0.1.11\nLABEL io.hass.version=${BUILD_VERSION} \\\n"
+            "      io.woowtech.woow-plugin.source=0.3.5@4ad95a11d8dad671b342d6cc9454c87a3130e8b6\n")
+        build_info = json.dumps({"addon_version": "0.1.11", "woow_plugin_source": "woow-paas-charts 0.3.5@4ad95a1"}, indent=2) + "\n"
+        f = FakeFetcher(overrides={(ha, "litellm/Dockerfile", "main"): dockerfile,
+                                   (ha, "litellm/rootfs/usr/share/woow-litellm/build-info.json", "main"): build_info,
+                                   (charts, "charts/litellm/Chart.yaml", head): "name: litellm\nversion: 0.3.14\n"})
+        f.bytes_overrides = {(charts, "charts/litellm/files/" + n, head): c for n, c in contents.items()}
+        plan = next(p for p in wvtbot.plan_fanout(m, f, TODAY, "ha") if p["product"] == "litellm")
+        self.assertIsNone(plan["blocked"], plan["blocked"])
+        df = plan["files"]["litellm/Dockerfile"]
+        self.assertIn("io.woowtech.woow-plugin.source=0.3.14@" + head, df)
+        self.assertEqual(wvt.extract_dockerfile_arg(df, "BUILD_VERSION"), "0.1.12")
+        info = json.loads(plan["files"]["litellm/rootfs/usr/share/woow-litellm/build-info.json"])
+        self.assertEqual(info, {"addon_version": "0.1.12", "woow_plugin_source": "woow-paas-charts 0.3.14@bbbbbbb"})
+        self.assertEqual(json.loads(plan["files"]["litellm/woow-plugin.lock.json"])["source"]["chart_version"], "0.3.14")
+        _, body = wvtbot.render_fanout(m, plan, None, "github")
+        self.assertIn("共用檔清單變了", body)
+
+    def test_bad_stamp_is_a_manifest_error(self):
+        m = manifest()
+        m["products"]["litellm"]["shared_files"][0]["consumers"][0]["stamps"] = [{"file": "x", "kind": "regex", "pattern": "(a)", "value": "{nope}"}]
+        self.assertTrue(any("stamps" in e for e in wvt.validate_manifest(m, TODAY)[0]))
+
+
 class PushBranchTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
