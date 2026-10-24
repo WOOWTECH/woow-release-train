@@ -643,10 +643,12 @@ products:
     upstream: {package: "pypi:odoo-mcp", source: "github:tuanle96/mcp-odoo"}
     policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
     target:
-      version: "1.1.0"
-      since: "2026-07-02"           # PyPI 上傳日
-      artifacts: {sdist: "sha256:335ff70d850af6a13416869217c656089032759624b6fe60b22732dc7b29debb"}   # odoo_mcp-1.1.0.tar.gz
-      verified: "2026-10-24 兩邊 uv.lock 的 sdist hash 相同；PyPI 最新 1.3.0（2026-07-29）"
+      version: "1.3.0"
+      since: "2026-10-24"           # PaaS 採用日（woow-mcp-server #82；PyPI 發佈 2026-07-29）
+      artifacts: {sdist: "sha256:5c1fb57c2ce6aadf354639da3438ebf700839eeb6f06cd87be42cbf9cdee76d3"}   # odoo_mcp-1.3.0.tar.gz（PyPI JSON digests）
+      verified: "2026-10-24 PyPI JSON：odoo_mcp-1.3.0.tar.gz sha256 與 PaaS 根 uv.lock 相同；1.3.0 需要 mcp>=2（GitHub 上的 1.3.1／1.3.2 未發到 PyPI）"
+    known_versions:
+      - {version: "1.1.0", artifacts: {sdist: "sha256:335ff70d850af6a13416869217c656089032759624b6fe60b22732dc7b29debb"}}   # odoo_mcp-1.1.0.tar.gz：HA 0.3.x 現用
     legs:
       ha:
         fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
@@ -678,7 +680,7 @@ products:
             compare: info
     exceptions: []
     notes:
-      - "上游身分一致（odoo-mcp 1.1.0）。patch 組合不同屬包裝差異：HA 2 支（cross_session_token_store、direct_writes），PaaS 3 支（另有 fix_remove_3step_tools）加 4 個執行期修補（upstream_fixes、result_limits、tool_errors、concurrency）。"
+      - "2026-10-24 PaaS #82 升 odoo-mcp 1.3.0（需要 mcp 2.x）；HA 維持 1.1.0 到 MCP SDK 2.x 第 2 階段，這段期間 HA 顯示落後。1.1.0 時兩邊上游身分一致。patch 組合不同屬包裝差異：HA 2 支（cross_session_token_store、direct_writes），PaaS 3 支（另有 fix_remove_3step_tools）加 4 個執行期修補（upstream_fixes、result_limits、tool_errors、concurrency）。"
 
   mcp-litellm:
     display_name: LiteLLM MCP（Woow_litellm_mcp_server）
@@ -728,11 +730,12 @@ products:
     upstream: {source: "gitea:WOOWTECH/woow-mcp-server"}   # apps/hermes 在 PaaS repo 內開發；HA 取某個 commit 的快照
     policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
     target:
-      version: "2026.10.23.2"       # 無語意化版號：最後修改 server.py 的 woow-mcp-server commit 日期＋當日序號（c4c1e69）
-      since: "2026-10-23"
-      artifacts: {server_py: "sha256:46257acee37e1e900d97e11643f51e6c6fde4353bcee2407f6dd025ff8f21a9f"}   # apps/hermes/hermes_mcp_server/server.py @main a5db051（c4c1e69 之後未變）
-      verified: "2026-10-24 本機 sha256sum（Gitea main a5db051）"
+      version: "2026.10.24.1"       # 無語意化版號：最後修改 server.py 的 woow-mcp-server commit 日期＋當日序號（471efdf，#82 SDK 2）
+      since: "2026-10-24"
+      artifacts: {server_py: "sha256:6b8abf82d4c8604af4ef2d3f2a8c475c8d72abb39ee62d0e00d4bb084a191b56"}   # apps/hermes/hermes_mcp_server/server.py @main 83d6de5（471efdf 之後未變）
+      verified: "2026-10-24 本機 sha256sum（Gitea main 83d6de5）"
     known_versions:
+      - {version: "2026.10.23.2", artifacts: {server_py: "sha256:46257acee37e1e900d97e11643f51e6c6fde4353bcee2407f6dd025ff8f21a9f"}}   # c4c1e69：HA 0.3.4 快照（SDK 1.x 版）
       - {version: "2026.10.23.1", artifacts: {server_py: "sha256:46cd8637447ceb16545238bdf6e2fc122503b09a33c93ffa896f197e88ffcfc5"}}   # 29c383f：HA 0.3.0 快照
       - {version: "2026.10.18", artifacts: {server_py: "sha256:9fe2b8ef398161ad3ac73e24beab24c5dd259ce085c9593cf65459c283203bf1"}}   # 77e3a75：10-18 商用驗收整合包
       - {version: "2026.8.11", artifacts: {server_py: "sha256:e1c3f7be4de0302fafb85848641d89a43e83565afa844da9f813f10a718c25a6"}}   # 614ae663：HA 0.2.x 快照
@@ -763,7 +766,8 @@ products:
             compare: info
     exceptions: []
     notes:
-      - "HA 0.3.0 取 29c383f 的快照（含 10-17／18 安全與功能修補，舊 PR #6／#7／#8 已涵蓋）；0.3.2 的來源紀錄對齊 main（c4c1e69：巢狀設定先驗證、寫入後讀回；HA 檔案內容 0.3.0 起已含）。"
+      - "HA 0.3.0 取 29c383f 的快照（含 10-17／18 安全與功能修補，舊 PR #6／#7／#8 已涵蓋）；HA 0.3.4 的來源紀錄對齊 c4c1e69（巢狀設定先驗證、寫入後讀回）。"
+      - "2026-10-24 PaaS #82 改用 SDK 2 的 MCPServer、工具例外文字維持 1.x（471efdf）→ HA 要到 MCP SDK 2.x 第 2 階段才會跟上，這段期間 HA 顯示落後。"
       - "包裝差異（不比較）：HA 允許區網 MCP 伺服器、擋 metadata／link-local／迴路位址（AI-HMCP-002-2）；PaaS 用 strict SSRF（另擋私有網段）。"
 
   mcp-emqx:
