@@ -836,9 +836,12 @@ products:
     upstream: {package: "pypi:mcp", source: "github:modelcontextprotocol/python-sdk"}
     policy: {mode: range, min_version: "1.30.0", max_days_behind: 30, downgrade: allowed, hard_rules: []}   # 1.30.0＝GHSA-84m7-p3x7-pcfv 修補版
     target:
-      version: "1.30.0"
-      since: "2026-10-16"           # PaaS 採用日（PyPI 發佈 2026-09-07）
-      verified: "2026-10-24 PyPI：1.x 最新仍是 1.30.0；2.x 線最新 2.3.0（大改版，兩邊一起另案評估）"
+      version: "2.3.0"
+      since: "2026-10-24"
+      verified: "2026-10-24 wvt propose：registry None:2.3.0"
+    known_versions:
+      - version: "1.30.0"
+        verified: "2026-10-24 PyPI：1.x 最新仍是 1.30.0；2.x 線最新 2.3.0（大改版，兩邊一起另案評估）"
     legs:
       ha:
         fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
