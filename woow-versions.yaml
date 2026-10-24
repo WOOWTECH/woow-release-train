@@ -182,13 +182,13 @@ products:
           repo: "gitea:woow-paas/woow-paas-charts"
           path: charts/litellm/files/
           branch: main
-          commit: "b9f5ca8e373e45826c948717f73a384d6b5e3ae1"
+          commit: "b3e8371487794d8531d1b5c01f11969088cd166d"
           require_on_main: true
           files: [sitecustomize.py, woow_chatgpt.py, woow_chatgpt_plugin.py, woow_ui_cookie_hardening.py, woow_body_limit.py, woow_usage_limit.py, woow_reasoning.py, woow_unpriced.py, woow_upstream_errors.py]
           blobs:   # git blob（git rev-parse <commit>:<path><file>）
             sitecustomize.py: "9fafb94e9ac1f927d79a38d2101aefcb1f4660dc"
-            woow_chatgpt.py: "00edd42c5c16d3badd27f0ef15e25d0cab2f35f8"
-            woow_chatgpt_plugin.py: "bd4313ab1690bedddf585cbc5b6684a3b525b662"
+            woow_chatgpt.py: "6b6d3abddd0f1354a87eddc7e2cd676da24ca599"
+            woow_chatgpt_plugin.py: "6e1877e9490f24cfb7aaeaa00b165905a136c315"
             woow_ui_cookie_hardening.py: "d566d1675ecab0162c95adc3d0153cfee3d09b53"
             woow_body_limit.py: "d861175cc9998821c9876d62453b328488723be0"
             woow_usage_limit.py: "2b162cb0f19632d4d7caa44359b5734eed85e44a"
@@ -196,6 +196,17 @@ products:
             woow_unpriced.py: "6c4477156f400fb2ecb1a3cc96aba51089da7186"
             woow_upstream_errors.py: "77aab32bbd6a41a85ebd3846712a7fa106cb6ec3"
         known_commits:
+          - commit: "b9f5ca8e373e45826c948717f73a384d6b5e3ae1"
+            blobs:
+              sitecustomize.py: "9fafb94e9ac1f927d79a38d2101aefcb1f4660dc"
+              woow_chatgpt.py: "00edd42c5c16d3badd27f0ef15e25d0cab2f35f8"
+              woow_chatgpt_plugin.py: "bd4313ab1690bedddf585cbc5b6684a3b525b662"
+              woow_ui_cookie_hardening.py: "d566d1675ecab0162c95adc3d0153cfee3d09b53"
+              woow_body_limit.py: "d861175cc9998821c9876d62453b328488723be0"
+              woow_usage_limit.py: "2b162cb0f19632d4d7caa44359b5734eed85e44a"
+              woow_reasoning.py: "ece1f8a5c966a6d8b7a9e0e3c39510952275cc59"
+              woow_unpriced.py: "6c4477156f400fb2ecb1a3cc96aba51089da7186"
+              woow_upstream_errors.py: "77aab32bbd6a41a85ebd3846712a7fa106cb6ec3"
           - commit: "d3cd6898b29a9e094fd616bc151399c9884e5c19"
             blobs:
               sitecustomize.py: "9fafb94e9ac1f927d79a38d2101aefcb1f4660dc"
