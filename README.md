@@ -28,7 +28,8 @@ HA 和 PaaS 各自升版，結果常常不一致。例如 n8n 在 HA 已是 2.43
 | 自動化程度 | 機器人只開 PR、跑測試；合併與發版一律由人做 |
 | Gitea | 機器人**永遠不合併** Gitea PR，也**不簽** paas-odoo-ci 的 `/approve` |
 | 第 0 期 | 只放 EMQX、LiteLLM、n8n 三個產品，只出報告 |
-| 雙向同步（2026-10-24） | 照建議進行第 1–3 期：兩邊 CI 檢查 → 機器人雙向開 PR → 加入 Hermes、OpenDesign、MCP servers。兩邊都人工合併；GitHub 端機器人用 GitHub App；公開鏡像的早期歷史一併清理 |
+| 雙向同步（2026-10-24） | 照建議進行第 1–3 期：兩邊 CI 檢查 → 機器人雙向開 PR → 加入 Hermes、OpenDesign、MCP servers。兩邊都人工合併；GitHub 端機器人用 GitHub App；公開鏡像的早期歷史一併清理（10-24 完成：改寫歷史、GitHub 鏡像重建） |
+| 第 3 期建議值（2026-10-24 確認） | OpenDesign 以 PaaS 的 core build 為目標；MCP servers 用 lockstep（兩邊完全同版）；Hermes 下限 0.22.5 |
 
 ## 清冊格式（schema 1）
 
