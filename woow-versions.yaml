@@ -182,14 +182,25 @@ products:
           repo: "gitea:woow-paas/woow-paas-charts"
           path: charts/litellm/files/
           branch: main
-          commit: "4ad95a11d8dad671b342d6cc9454c87a3130e8b6"
+          commit: "d3cd6898b29a9e094fd616bc151399c9884e5c19"
           require_on_main: true
-          files: [sitecustomize.py, woow_chatgpt.py, woow_chatgpt_plugin.py]
+          files: [sitecustomize.py, woow_chatgpt.py, woow_chatgpt_plugin.py, woow_ui_cookie_hardening.py, woow_body_limit.py, woow_usage_limit.py, woow_reasoning.py, woow_unpriced.py, woow_upstream_errors.py]
           blobs:   # git blob（git rev-parse <commit>:<path><file>）
-            sitecustomize.py: "f5407aacd4ed0d0202da7d6c578ef6a267b8a45b"
-            woow_chatgpt.py: "527c16c68a83958cc2f124253632b98de20b56c6"
-            woow_chatgpt_plugin.py: "cfcd0f65c257f44db3e995ea6fd635e76c7255f3"
-        known_commits: []
+            sitecustomize.py: "9fafb94e9ac1f927d79a38d2101aefcb1f4660dc"
+            woow_chatgpt.py: "1603136fd6794f259c496d0501a71105a39b1e15"
+            woow_chatgpt_plugin.py: "f766e88f8279f8220eefe39cde5cfb82001c65bd"
+            woow_ui_cookie_hardening.py: "dd1c42a7dc649959263d1c466753554ac1c08a50"
+            woow_body_limit.py: "d861175cc9998821c9876d62453b328488723be0"
+            woow_usage_limit.py: "2b162cb0f19632d4d7caa44359b5734eed85e44a"
+            woow_reasoning.py: "ece1f8a5c966a6d8b7a9e0e3c39510952275cc59"
+            woow_unpriced.py: "6c4477156f400fb2ecb1a3cc96aba51089da7186"
+            woow_upstream_errors.py: "77aab32bbd6a41a85ebd3846712a7fa106cb6ec3"
+        known_commits:
+          - commit: "4ad95a11d8dad671b342d6cc9454c87a3130e8b6"
+            blobs:
+              sitecustomize.py: "f5407aacd4ed0d0202da7d6c578ef6a267b8a45b"
+              woow_chatgpt.py: "527c16c68a83958cc2f124253632b98de20b56c6"
+              woow_chatgpt_plugin.py: "cfcd0f65c257f44db3e995ea6fd635e76c7255f3"
         consumers:
           - leg: ha
             repo: "github:WOOWTECH/Woow_ha_litellm"
