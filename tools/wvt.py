@@ -1064,6 +1064,12 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
             for c in sf.get("consumers") or []:
                 if c.get("leg") not in LEGS or not REPO_RE.match(str(c.get("repo") or "")) or not c.get("lock"):
                     E("%s.shared_files.consumers entry needs leg/repo/lock" % where)
+                for st in c.get("stamps") or []:
+                    ok = st.get("file") and st.get("kind") in ("regex", "json") and st.get(
+                        "pattern" if st.get("kind") == "regex" else "path") and isinstance(st.get("value"), str)
+                    if not ok or re.sub(r"\{(chart_version|commit|commit7)\}", "", str(st.get("value"))).count("{"):
+                        E("%s.shared_files.consumers stamps need file, kind regex|json, pattern|path and a value "
+                          "using {chart_version} {commit} {commit7}" % where)
         for ex in p.get("exceptions") or []:
             ew = "%s.exceptions[%s]" % (where, ex.get("what"))
             if ex.get("leg") not in legs:

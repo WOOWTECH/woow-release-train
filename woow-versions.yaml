@@ -205,6 +205,9 @@ products:
           - leg: ha
             repo: "github:WOOWTECH/Woow_ha_litellm"
             lock: litellm/woow-plugin.lock.json
+            stamps:   # 同步時一起改寫的外掛來源標記（HA 合約測試會比對它們和 lock）
+              - {file: litellm/Dockerfile, kind: regex, pattern: 'io\.woowtech\.woow-plugin\.source=(\S+)', value: "{chart_version}@{commit}"}
+              - {file: litellm/rootfs/usr/share/woow-litellm/build-info.json, kind: json, path: woow_plugin_source, value: "woow-paas-charts {chart_version}@{commit7}"}
     legs:
       ha:
         repo: "github:WOOWTECH/Woow_ha_litellm"
@@ -244,6 +247,16 @@ products:
             path: version
             bump: patch
             note: "私人映像，只裝公司 HA，不在 Store catalog"
+          - label: 建置版號（BUILD_VERSION）
+            file: litellm/Dockerfile
+            kind: dockerfile_arg
+            name: BUILD_VERSION
+            bump: patch
+          - label: build-info addon_version
+            file: litellm/rootfs/usr/share/woow-litellm/build-info.json
+            kind: json
+            path: addon_version
+            bump: patch
         fanout:
           changelog: litellm/CHANGELOG.md
           changelog_entry: "- 上游 {name} {old} → {new}（woow release train 清冊）。合併前請改成實際變更說明。"
