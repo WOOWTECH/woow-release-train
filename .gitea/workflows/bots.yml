@@ -9,7 +9,8 @@ name: Bots
 # 權杖只經 env 傳給 wvtbot（不寫檔、不印出）：
 #   GITEA_READ_TOKEN      org secret CI_GITEA_TOKEN：讀各 repo（CD、charts 是私人 repo）與鏡像核可單
 #   GITEA_TOKEN           本次執行自動發的 token：在本 repo 推 wvt/propose-* 分支、開清冊 PR
-#   WVT_GITEA_BOT_TOKEN   （fanout_paas）在 charts／平台／paas-odoo-ci 開 PR、dispatch mirror-image；有設時清冊 PR 也用它
+#   WVT_GITEA_BOT_TOKEN   ＝CI_GITEA_TOKEN（Eugene 的權杖，負責人 2026-10-24 選 A）：在 charts／平台／paas-odoo-ci
+#                         開 PR、dispatch mirror-image；清冊 PR 也用它，所以機器人 PR 會跑 CI（GITEA_TOKEN 開的不會）
 #   WVT_GH_APP_ID、WVT_GH_APP_PRIVATE_KEY  （fanout_ha）GitHub App，只裝在 HA add-on repo
 on:
   schedule:
@@ -50,7 +51,8 @@ jobs:
           GITEA_GIT_URL: http://gitea-http.gitea.svc.cluster.local:3000
           GITEA_READ_TOKEN: ${{ secrets.CI_GITEA_TOKEN }}
           GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
-          WVT_GITEA_BOT_TOKEN: ${{ secrets.WVT_GITEA_BOT_TOKEN }}
+          WVT_GITEA_BOT_TOKEN: ${{ secrets.CI_GITEA_TOKEN }}
+          WVT_GITEA_BOT_USER: ${{ secrets.CI_GITEA_USERNAME }}
           WVT_GH_APP_ID: ${{ secrets.WVT_GH_APP_ID }}
           WVT_GH_APP_PRIVATE_KEY: ${{ secrets.WVT_GH_APP_PRIVATE_KEY }}
           BOT: ${{ inputs.bot || 'all' }}

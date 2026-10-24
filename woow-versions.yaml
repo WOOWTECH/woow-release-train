@@ -44,7 +44,7 @@ probes:
 bots:
   propose: open-pr        # 某一邊比清冊新 → 本 repo 的清冊 PR（版本負責人合併）
   fanout_ha: dry-run      # 清冊比 HA 新 → HA repo PR；GitHub App（WVT_GH_APP_ID／WVT_GH_APP_PRIVATE_KEY）建好後改 open-pr
-  fanout_paas: dry-run    # 清冊比 PaaS 新 → mirror-image（人工 /approve）＋PaaS PR；Gitea 機器人帳號定案後改 open-pr
+  fanout_paas: open-pr    # 清冊比 PaaS 新 → mirror-image（人工 /approve）＋PaaS PR；用 CI_GITEA_TOKEN（10-24 決定 A）
 
 products:
 

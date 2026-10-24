@@ -29,6 +29,7 @@ HA 和 PaaS 各自升版，結果常常不一致。例如 n8n 在 HA 已是 2.43
 | Gitea | 機器人**永遠不合併** Gitea PR，也**不簽** paas-odoo-ci 的 `/approve` |
 | 第 0 期 | 只放 EMQX、LiteLLM、n8n 三個產品，只出報告 |
 | 雙向同步（2026-10-24） | 照建議進行第 1–3 期：兩邊 CI 檢查 → 機器人雙向開 PR → 加入 Hermes、OpenDesign、MCP servers。兩邊都人工合併；GitHub 端機器人用 GitHub App；公開鏡像的早期歷史一併清理（10-24 完成：改寫歷史、GitHub 鏡像重建） |
+| Gitea 機器人權杖（2026-10-24） | 沿用 org secret `CI_GITEA_TOKEN`（Eugene 的帳號）：機器人在 Gitea 開的 PR 與 mirror-image 核可單都掛在這個帳號名下，機器人 PR 也會跑 CI |
 | 第 3 期建議值（2026-10-24 確認） | OpenDesign 以 PaaS 的 core build 為目標；MCP servers 用 lockstep（兩邊完全同版）；Hermes 下限 0.22.5 |
 
 ## 清冊格式（schema 1）
@@ -216,7 +217,7 @@ jobs:
 |---|---|---|---|
 | `propose` | 某一邊的預設分支（HA main、charts／paas-odoo-ci main、平台 develop）比清冊新 → 到 registry 查該版的 index 與各架構 digest（EMQX 另取官方 tarball 的 `.sha256`）→ 開清冊 PR，舊目標移到 `known_versions`。共用檔來源先改 → 換 commit＋blobs，並把共用檔 import 的同目錄模組一起列入共用清單 | `GITEA_TOKEN`（本 repo） | 版本負責人 |
 | `fanout_ha` | 清冊比 HA 新 → 每個 HA repo 一張 PR：改 Dockerfile ARG／lock 檔、add-on 版號（`bump` 規則）、CHANGELOG 加一行待改的說明、LiteLLM 共用檔複本＋lock | GitHub App（`WVT_GH_APP_ID`、`WVT_GH_APP_PRIVATE_KEY`） | HA 維護者 |
-| `fanout_paas` | 清冊比 PaaS 新 → 先找 paas-odoo-ci 的 mirror-image 核可單（沒有就 dispatch，等人 `/approve`）；放行後改 seed／charts／paas-odoo-ci | `WVT_GITEA_BOT_TOKEN` | Eugene、Elmo |
+| `fanout_paas` | 清冊比 PaaS 新 → 先找 paas-odoo-ci 的 mirror-image 核可單（沒有就 dispatch，等人 `/approve`）；放行後改 seed／charts／paas-odoo-ci | `CI_GITEA_TOKEN`（經 `WVT_GITEA_BOT_TOKEN`） | Eugene、Elmo |
 
 - **模式在清冊**：`bots.<名稱>` 是 `off`、`dry-run`（只在執行摘要列計畫）或 `open-pr`。改模式也是清冊 PR。
 - **一個產品、一個 repo、一個分支**：`wvt/propose-<產品>`、`wvt/fanout-<產品>`。重跑只更新同一張 PR；內容沒變就不推；那一邊對齊後，機器人關掉自己的 PR。
