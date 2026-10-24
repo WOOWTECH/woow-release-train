@@ -511,16 +511,17 @@ products:
       downgrade: allowed
       hard_rules: []
     target:
-      version: "20261024.0713"      # core build id（core tag＝PaaS 外殼 tag）
+      version: "20261024.0943"      # core build id（core tag＝PaaS 外殼 tag）
       since: "2026-10-24"
       platforms:
-        amd64: "sha256:bdb9febc456e48ee264ba506192b5d6553b65d9aadb132a45703b42af23b5aa8"   # 單一架構 manifest（不是 index）
+        amd64: "sha256:ffbb2bd070c488d79d960ee72fb7717f43791af6a4ae1585943598ad444a76e0"   # 單一架構 manifest（不是 index）
       identity:
         upstream_version: "0.24.1"
-        fork_commit: "605efabdd33cc7bf86876c12d12f77429ef58384"        # woow-od-v0.24.1-w2.3（外掛頁內建 MCP Server／CLI 終端機）
+        fork_commit: "b8a1371924d3aedb74dff563a5ff35a783919dee"        # woow-od-v0.24.1-w2.4（外掛頁內建 MCP Server／CLI 終端機，預設分頁置頂）
         upstream_commit: "89e64d813bb1c7a11519b3f668f011f7017637d7"    # open-design-v0.24.1
-      verified: "20261024.0713 的 digest 以 crane 從 jcr-prod 讀回（paas-odoo-ci 核可單 #397 promote 後），並依 digest 複製到 GHCR、匿名讀回相同（2026-10-24T07:45Z）"
+      verified: "20261024.0943 的 digest 以 crane 從 jcr-prod 讀回（paas-odoo-ci 核可單 #401，promote run 27155），並依 digest 複製到 GHCR、匿名讀回相同（2026-10-24T10:06Z）"
     known_versions:
+      - {version: "20261024.0713", platforms: {amd64: "sha256:bdb9febc456e48ee264ba506192b5d6553b65d9aadb132a45703b42af23b5aa8"}}   # fork w2.3；未上線（內建外掛只在「已安裝」分頁）
       - {version: "20261018.1219", platforms: {amd64: "sha256:f349632632e0c3fa9e546da8e83f89aa60d283d473fdf47fffa5728e01cde023"}}   # HA 0.2.3～0.2.4；fork w2.2
       - {version: "20261015.0617", platforms: {amd64: "sha256:c5496453136b5ddc1ec3376c0f7518bfb2ba5091ff1ba75bfadf645d1c52a683"}}   # HA 0.2.1～0.2.2 現用；無 OD_APP_VERSION（/api/version 回 0.23.1）
       - {version: "20261014.1921", platforms: {amd64: "sha256:bfec7cc6c96b559506f33dce9296d9c2e02e9acbb0fe543ad434ea66370baf35"}}   # GHCR 別名 0.24.1-w2.1
