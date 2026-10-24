@@ -215,14 +215,14 @@ jobs:
 
 | 機器人 | 做什麼 | 權杖 | 誰合併 |
 |---|---|---|---|
-| `propose` | 某一邊的預設分支（HA main、charts／paas-odoo-ci main、平台 develop）比清冊新 → 到 registry 查該版的 index 與各架構 digest（EMQX 另取官方 tarball 的 `.sha256`）→ 開清冊 PR，舊目標移到 `known_versions`。共用檔來源先改 → 換 commit＋blobs，並把共用檔 import 的同目錄模組一起列入共用清單 | `GITEA_TOKEN`（本 repo） | 版本負責人 |
+| `propose` | 某一邊的預設分支（HA main、charts／paas-odoo-ci main、平台 develop）比清冊新 → 查該版的上游身分：映像到 registry 查 index 與各架構 digest（EMQX 另取官方 tarball 的 `.sha256`），PyPI／npm 套件查套件 registry（`upstream.package`）→ 開清冊 PR，舊目標移到 `known_versions`。共用檔來源先改 → 換 commit＋blobs，並把共用檔 import 的同目錄模組一起列入共用清單 | `GITEA_TOKEN`（本 repo） | 版本負責人 |
 | `fanout_ha` | 清冊比 HA 新 → 每個 HA repo 一張 PR：改 Dockerfile ARG／lock 檔、add-on 版號（`bump` 規則）、CHANGELOG 加一行待改的說明、LiteLLM 共用檔複本＋lock | GitHub App（`WVT_GH_APP_ID`、`WVT_GH_APP_PRIVATE_KEY`） | HA 維護者 |
 | `fanout_paas` | 清冊比 PaaS 新 → 先找 paas-odoo-ci 的 mirror-image 核可單（沒有就 dispatch，等人 `/approve`）；放行後改 seed／charts／paas-odoo-ci | `CI_GITEA_TOKEN`（經 `WVT_GITEA_BOT_TOKEN`） | Eugene、Elmo |
 
 - **模式在清冊**：`bots.<名稱>` 是 `off`、`dry-run`（只在執行摘要列計畫）或 `open-pr`。改模式也是清冊 PR。
 - **一個產品、一個 repo、一個分支**：`wvt/propose-<產品>`、`wvt/fanout-<產品>`。重跑只更新同一張 PR；內容沒變就不推；那一邊對齊後，機器人關掉自己的 PR。
 - **被關掉的提案不重開**：版本負責人關掉（不合併）的同一個提案不會再開。要重提，手動執行 `bots.yml` 並填 `product`、`version`。
-- **安全邊界**：不提超過授權上限的版本；某一邊釘的 digest 跟 registry 查到的不同就不提案；禁止降版的產品不往下提；鏡像核可單被拒或逾時不自動重送。
+- **安全邊界**：不提超過授權上限的版本；某一邊釘的 digest 跟上游查到的不同就不提案（往前那一邊同一個 repo 裡的產物雜湊也算，例如 uv.lock 的 sdist hash、Dockerfile 的 tarball sha256；相同時寫進 `verified`）；PyPI 已撤回（yanked）、npm 已棄用（deprecated）的版本不提案；`target.identity` 裡機器人查不到的值（commit、build id）只在計畫註明，由人改清冊；禁止降版的產品不往下提；鏡像核可單被拒或逾時不自動重送。
 - **PR 只是起點**：機器人只改清冊知道的釘點。文件、測試、遷移說明由各 repo 的 CI 與審核者補齊；資料遷移單向的產品（n8n）PR 內文要求附升級證據。
 
 ```sh
@@ -236,6 +236,7 @@ python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode
 |---|---|
 | `upstream.image_tag` | 版本對應的映像 tag，預設 `{version}`（Hermes 用 `v{version}`） |
 | `upstream.artifact_sha256.<名稱>` | 非映像產物（例如 EMQX tarball）的 `.sha256` 網址，含 `{version}` |
+| `upstream.package` | `pypi:<名稱>`／`npm:<名稱>`：propose 到套件 registry 查新版。PyPI 一律查 `https://pypi.org/pypi/<名稱>/<版本>/json`（撤回的不提案），`target.artifacts` 的 `sdist`（.tar.gz）、`wheel`（唯一的 wheel）取 `urls[].digests.sha256`。npm 只在 `target.identity` 有 `integrity`／`shasum` 時查 `https://registry.npmjs.org/<名稱>/<版本>` 的 `dist.*`（npm 不提供 sha256，所以不放 `artifacts`；棄用的不提案）。`verified` 寫實際來源，例如 `pypi odoo-mcp 1.3.0（sdist sha256 取自 PyPI JSON）`、`npm n8n-mcp 2.96.2`；有映像才寫 `registry <image>:<tag>` |
 | `package_version[].bump` | fanout 時包裝版號怎麼變：`same`＝等於上游版本、`patch`＝+0.0.1、`none`（預設）＝不動 |
 | `legs.<邊>.fanout.changelog` | 要加一行的 CHANGELOG；`changelog_entry`／`changelog_shared` 改寫那一行的文字 |
 | `legs.paas.mirror` | `{dest_name, digest}`：PaaS 釘的是 JCR 鏡像時，fanout 先 dispatch mirror-image |
@@ -244,7 +245,7 @@ python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode
 
 ## 新增一個產品
 
-1. 用 `crane manifest <image>:<version>` 取得 index 與各架構 digest，寫進 `target`，並在 `verified` 註明日期與指令。
+1. 映像用 `crane manifest <image>:<version>` 取得 index 與各架構 digest；PyPI 套件從 `https://pypi.org/pypi/<名稱>/<版本>/json` 取 sdist sha256（npm 的 integrity 放 `target.identity`）。寫進 `target`，並在 `verified` 註明日期與來源。
 2. 決定 `policy.mode`。range 必須寫 `min_version`、`max_days_behind`、`target.since`。
 3. 為 `ha`、`paas` 各列出釘點（`pins`），包裝版號放 `package_version`；HA 有上架 Store 的加 `published`。
 4. 如果某邊目前停在舊 digest，把該版加進 `known_versions`，報告才能換算出版本。

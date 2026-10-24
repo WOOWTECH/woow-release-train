@@ -1,0 +1,13 @@
+{
+  "_recorded": "2026-10-25 錄自 GET https://registry.npmjs.org/request/2.88.2；刪掉 description 等用不到的欄位",
+  "name": "request",
+  "version": "2.88.2",
+  "deprecated": "request has been deprecated, see https://github.com/request/request/issues/3142",
+  "dist": {
+    "integrity": "sha512-MsvtOrfG9ZcrOwAW+Qi+F6HbD0CWXEh9ou77uOb7FM2WPhwT7smM833PzanhJLsgXjN89Ir6V2PczXNnMpwKhw==",
+    "shasum": "d73c918731cb5a87da047e207234146f664d12b3",
+    "tarball": "https://registry.npmjs.org/request/-/request-2.88.2.tgz",
+    "fileCount": 17,
+    "unpackedSize": 209281
+  }
+}
