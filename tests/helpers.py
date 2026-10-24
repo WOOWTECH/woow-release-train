@@ -13,7 +13,10 @@ sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import wvt  # noqa: E402
 
-MANIFEST_PATH = os.path.join(ROOT, "woow-versions.yaml")
+# Behaviour tests read a frozen snapshot that matches the fixtures; the bots rewrite the live
+# manifest, which is only checked for being valid (test_manifest.LiveManifestTest).
+MANIFEST_PATH = os.path.join(FIX, "woow-versions.yaml")
+LIVE_MANIFEST_PATH = os.path.join(ROOT, "woow-versions.yaml")
 
 
 def fixture(*parts):

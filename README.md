@@ -28,7 +28,8 @@ HA 和 PaaS 各自升版，結果常常不一致。例如 n8n 在 HA 已是 2.43
 | 自動化程度 | 機器人只開 PR、跑測試；合併與發版一律由人做 |
 | Gitea | 機器人**永遠不合併** Gitea PR，也**不簽** paas-odoo-ci 的 `/approve` |
 | 第 0 期 | 只放 EMQX、LiteLLM、n8n 三個產品，只出報告 |
-| 雙向同步（2026-10-24） | 照建議進行第 1–3 期：兩邊 CI 檢查 → 機器人雙向開 PR → 加入 Hermes、OpenDesign、MCP servers。兩邊都人工合併；GitHub 端機器人用 GitHub App；公開鏡像的早期歷史一併清理 |
+| 雙向同步（2026-10-24） | 照建議進行第 1–3 期：兩邊 CI 檢查 → 機器人雙向開 PR → 加入 Hermes、OpenDesign、MCP servers。兩邊都人工合併；GitHub 端機器人用 GitHub App；公開鏡像的早期歷史一併清理（10-24 完成：改寫歷史、GitHub 鏡像重建） |
+| 第 3 期建議值（2026-10-24 確認） | OpenDesign 以 PaaS 的 core build 為目標；MCP servers 用 lockstep（兩邊完全同版）；Hermes 下限 0.22.5 |
 
 ## 清冊格式（schema 1）
 
@@ -246,7 +247,7 @@ python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode
 2. 決定 `policy.mode`。range 必須寫 `min_version`、`max_days_behind`、`target.since`。
 3. 為 `ha`、`paas` 各列出釘點（`pins`），包裝版號放 `package_version`；HA 有上架 Store 的加 `published`。
 4. 如果某邊目前停在舊 digest，把該版加進 `known_versions`，報告才能換算出版本。
-5. 本機跑 `python3 tools/wvt.py validate`、`python3 -m unittest discover -s tests`，以及 `drift`（需要 Gitea 權杖，放環境變數 `GITEA_READ_TOKEN`）。
+5. 本機跑 `python3 tools/wvt.py validate`、`python3 -m unittest discover -s tests`，以及 `drift`（需要 Gitea 權杖，放環境變數 `GITEA_READ_TOKEN`）。單元測試讀的是凍結快照 `tests/fixtures/woow-versions.yaml`（和 fixtures 配套），線上清冊只驗格式；機器人改線上清冊不會讓測試壞掉。新產品要測讀法時，把它加進快照與 fixtures。
 6. 開 PR。改清冊就是改版本政策，**一律人工合併**。
 
 ## 分期
