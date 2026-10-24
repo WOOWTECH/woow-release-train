@@ -1,0 +1,39 @@
+{
+  "_recorded": "2026-10-25 錄自 GET https://pypi.org/pypi/odoo-mcp/1.3.0/json；刪掉 description 等用不到的欄位",
+  "info": {
+    "name": "odoo-mcp",
+    "version": "1.3.0",
+    "yanked": false,
+    "yanked_reason": null
+  },
+  "urls": [
+    {
+      "filename": "odoo_mcp-1.3.0-py3-none-any.whl",
+      "packagetype": "bdist_wheel",
+      "digests": {
+        "blake2b_256": "cc049abd7fb30705c0809b4b132269b1c8249f2d7fcc3e607851b681e74880d7",
+        "md5": "c02986431e766d7816704c2b50f1193e",
+        "sha256": "a49855b694cd4ed4025e929f899f281becb5f42a129d403a18c0f17f8759bb43"
+      },
+      "size": 140441,
+      "upload_time_iso_8601": "2026-07-29T02:54:12.347192Z",
+      "url": "https://files.pythonhosted.org/packages/cc/04/9abd7fb30705c0809b4b132269b1c8249f2d7fcc3e607851b681e74880d7/odoo_mcp-1.3.0-py3-none-any.whl",
+      "yanked": false,
+      "yanked_reason": null
+    },
+    {
+      "filename": "odoo_mcp-1.3.0.tar.gz",
+      "packagetype": "sdist",
+      "digests": {
+        "blake2b_256": "4cf9e67c6f366d28cb58b274d6d8f05344aaa1b9210f30400a6d7ce9a9830d6d",
+        "md5": "4da8ba831e82bbdd1c575b5e25539fd8",
+        "sha256": "5c1fb57c2ce6aadf354639da3438ebf700839eeb6f06cd87be42cbf9cdee76d3"
+      },
+      "size": 305955,
+      "upload_time_iso_8601": "2026-07-29T02:54:13.756489Z",
+      "url": "https://files.pythonhosted.org/packages/4c/f9/e67c6f366d28cb58b274d6d8f05344aaa1b9210f30400a6d7ce9a9830d6d/odoo_mcp-1.3.0.tar.gz",
+      "yanked": false,
+      "yanked_reason": null
+    }
+  ]
+}

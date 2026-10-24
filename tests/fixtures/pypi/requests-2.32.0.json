@@ -1,0 +1,39 @@
+{
+  "_recorded": "2026-10-25 錄自 GET https://pypi.org/pypi/requests/2.32.0/json；刪掉 description 等用不到的欄位",
+  "info": {
+    "name": "requests",
+    "version": "2.32.0",
+    "yanked": true,
+    "yanked_reason": "Yanked due to conflicts with CVE-2024-35195 mitigation"
+  },
+  "urls": [
+    {
+      "filename": "requests-2.32.0-py3-none-any.whl",
+      "packagetype": "bdist_wheel",
+      "digests": {
+        "blake2b_256": "24e809e8d662a9675a4e4f5dd7a8e6127b463a091d2703ed931a64aa66d00065",
+        "md5": "53f4922c1891e32e32ce579c1825171f",
+        "sha256": "f2c3881dddb70d056c5bd7600a4fae312b2a300e39be6a118d30b90bd27262b5"
+      },
+      "size": 63695,
+      "upload_time_iso_8601": "2024-05-20T16:08:19.530618Z",
+      "url": "https://files.pythonhosted.org/packages/24/e8/09e8d662a9675a4e4f5dd7a8e6127b463a091d2703ed931a64aa66d00065/requests-2.32.0-py3-none-any.whl",
+      "yanked": true,
+      "yanked_reason": "Yanked due to conflicts with CVE-2024-35195 mitigation"
+    },
+    {
+      "filename": "requests-2.32.0.tar.gz",
+      "packagetype": "sdist",
+      "digests": {
+        "blake2b_256": "28a2423f4d16d6934ef502f10ad56673719dd4345e656aedbd6687ccc359ffc5",
+        "md5": "00693243143146aad73add14b3737662",
+        "sha256": "fa5490319474c82ef1d2c9bc459d3652e3ae4ef4c4ebdd18a21145a47ca4b6b8"
+      },
+      "size": 114373,
+      "upload_time_iso_8601": "2024-05-20T16:11:48.306524Z",
+      "url": "https://files.pythonhosted.org/packages/28/a2/423f4d16d6934ef502f10ad56673719dd4345e656aedbd6687ccc359ffc5/requests-2.32.0.tar.gz",
+      "yanked": true,
+      "yanked_reason": "Yanked due to conflicts with CVE-2024-35195 mitigation"
+    }
+  ]
+}

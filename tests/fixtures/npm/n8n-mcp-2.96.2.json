@@ -1,0 +1,12 @@
+{
+  "_recorded": "2026-10-25 錄自 GET https://registry.npmjs.org/n8n-mcp/2.96.2；刪掉 description 等用不到的欄位",
+  "name": "n8n-mcp",
+  "version": "2.96.2",
+  "dist": {
+    "integrity": "sha512-fnpvAEuXOBRP0J6Uy3BjIyRja3y4Ox9rsmohqPb1qUEshso9aBt4L5/aYgSEl6lq/HoBPJ+DmZV0hP/GS+B/Dg==",
+    "shasum": "af2f94f805e43c254de88f4228b3dda6eb1fa17b",
+    "tarball": "https://registry.npmjs.org/n8n-mcp/-/n8n-mcp-2.96.2.tgz",
+    "fileCount": 974,
+    "unpackedSize": 78497872
+  }
+}

@@ -2,8 +2,8 @@
 """wvtbot — woow release train bots, phase 2 (stdlib only).
 
   propose   a leg's default branch is ahead of the manifest, or the source of a shared
-            file changed first → look the new version up in its registry → a manifest PR
-            on Gitea (the version owner merges it)
+            file changed first → look the new version up in its registry (OCI, PyPI, npm)
+            → a manifest PR on Gitea (the version owner merges it)
   fanout    the manifest is ahead of a leg → a PR in each of that leg's repos: HA on
             GitHub through the GitHub App, PaaS on Gitea once the upstream digest is
             mirrored into JCR (mirror-image, a human comments /approve)
@@ -165,6 +165,112 @@ def fetch_sha256_file(url: str, get=None) -> str:
     if not m:
         raise WvtError("%s: no sha256 in the file" % url)
     return "sha256:" + m.group(1)
+
+
+# --------------------------------------------------------------------------
+# Package registries (upstream.package): one PyPI / npm release, from their JSON APIs
+# --------------------------------------------------------------------------
+
+PYPI_JSON = "https://pypi.org/pypi/{name}/{version}/json"
+NPM_JSON = "https://registry.npmjs.org/{name}/{version}"
+# target.artifacts.<name> of a PyPI package -> packagetype of the release file it is the sha256 of
+PYPI_ARTIFACTS = {"sdist": "sdist", "wheel": "bdist_wheel", "bdist_wheel": "bdist_wheel"}
+# target.identity.<name> of an npm package <- dist.<name>. npm publishes no sha256 (integrity is a
+# sha512 SRI string, shasum a sha1), so these are identities, never artifacts.
+NPM_DIST = ("integrity", "shasum")
+
+
+def split_package(spec):
+    """'pypi:odoo-mcp' -> ('pypi', 'odoo-mcp'); None when there is no upstream.package."""
+    eco, sep, name = str(spec or "").partition(":")
+    return (eco, name) if sep and eco and name else None
+
+
+def _registry_json(url: str, what: str, get=None) -> dict:
+    st, _, body = (get or (lambda u, h: http(u, h)))(url, {"Accept": "application/json"})
+    if st == 404:
+        raise WvtError("%s 不存在（%s：HTTP 404）" % (what, url))
+    if st != 200:
+        raise WvtError("%s：HTTP %d" % (url, st))
+    try:
+        doc = json.loads(body)
+    except ValueError:
+        doc = None
+    if not isinstance(doc, dict):
+        raise WvtError("%s：回應不是 JSON 物件" % url)
+    return doc
+
+
+def pypi_release(name: str, version: str, get=None) -> dict:
+    """The PyPI JSON of one release. A yanked release is refused: it must never become a target."""
+    url = PYPI_JSON.format(name=urllib.parse.quote(name), version=urllib.parse.quote(version))
+    doc = _registry_json(url, "PyPI %s %s" % (name, version), get)
+    info = doc.get("info") or {}
+    if info.get("yanked"):
+        raise WvtError("PyPI %s %s 已撤回（yanked：%s），不提案" % (name, version, info.get("yanked_reason") or "未註明原因"))
+    return doc
+
+
+def pypi_artifact(doc: dict, name: str, version: str, artifact: str) -> str:
+    """sha256 of the release file an artifact names: sdist = the .tar.gz, wheel = the only wheel."""
+    ptype = PYPI_ARTIFACTS.get(artifact)
+    if not ptype:
+        raise WvtError("artifacts.%s：PyPI 套件只對得到 sdist、wheel（bdist_wheel）；其他產物請在 "
+                       "upstream.artifact_sha256 給 .sha256 網址" % artifact)
+    files = [u for u in doc.get("urls") or [] if u.get("packagetype") == ptype
+             and (ptype != "sdist" or str(u.get("filename") or "").endswith(".tar.gz"))]
+    kind = "sdist（.tar.gz）" if ptype == "sdist" else "wheel"
+    if not files:
+        raise WvtError("PyPI %s %s 沒有 %s，無法核對 artifacts.%s" % (name, version, kind, artifact))
+    if len(files) > 1:
+        names = [str(u.get("filename")) for u in files]
+        raise WvtError("PyPI %s %s 有 %d 個 %s（%s），無法決定 artifacts.%s 是哪一個"
+                       % (name, version, len(files), kind, "、".join(names[:3]) + ("…" if len(names) > 3 else ""), artifact))
+    f = files[0]
+    if f.get("yanked"):
+        raise WvtError("PyPI %s 已撤回（yanked：%s），不提案" % (f.get("filename"), f.get("yanked_reason") or "未註明原因"))
+    sha = str((f.get("digests") or {}).get("sha256") or "")
+    if not re.fullmatch(r"[0-9a-f]{64}", sha):
+        raise WvtError("PyPI %s 沒有 sha256" % f.get("filename"))
+    return "sha256:" + sha
+
+
+def npm_release(name: str, version: str, get=None) -> dict:
+    """The npm registry document of one version. npm has no yank: a deprecated version is refused."""
+    url = NPM_JSON.format(name=urllib.parse.quote(name, safe="@"), version=urllib.parse.quote(version))
+    doc = _registry_json(url, "npm %s@%s" % (name, version), get)
+    if doc.get("deprecated"):
+        raise WvtError("npm %s@%s 已棄用（deprecated：%s），不提案" % (name, version, doc["deprecated"]))
+    return doc
+
+
+def package_fields(pkg, version: str, artifacts: list, identity: list, get=None) -> tuple:
+    """({artifact: sha256}, {identity: value}, source text) of a package release, from its registry.
+
+    PyPI is always asked: the release must exist and not be yanked, and the `artifacts` the target
+    records (sdist, wheel) come from the JSON digests. npm is asked only when the target records an
+    `identity` integrity / shasum (dist.*); it publishes no sha256, so an npm artifact is refused.
+    """
+    eco, name = pkg
+    if eco == "pypi":
+        doc = pypi_release(name, version, get)
+        arts = {a: pypi_artifact(doc, name, version, a) for a in artifacts}
+        how = ("%s sha256 取自 PyPI JSON" % "、".join(artifacts)) if artifacts else "PyPI JSON 確認已發佈、未撤回"
+        return arts, {}, "pypi %s %s（%s）" % (name, version, how)
+    if eco == "npm":
+        if artifacts:
+            raise WvtError("artifacts.%s：npm registry 只有 dist.integrity（sha512）與 dist.shasum（sha1），沒有 sha256；"
+                           "請改記在 target.identity.integrity／shasum" % artifacts[0])
+        if not identity:
+            return {}, {}, "npm %s %s" % (name, version)
+        dist = npm_release(name, version, get).get("dist") or {}
+        missing = [k for k in identity if not dist.get(k)]
+        if missing:
+            raise WvtError("npm %s@%s 的 dist 沒有 %s" % (name, version, "、".join(missing)))
+        return {}, {k: str(dist[k]) for k in identity}, "npm %s %s（%s 取自 npm registry）" % (name, version, "、".join(identity))
+    if artifacts or identity:
+        raise WvtError("upstream.package %s:%s：只認得 pypi:／npm:，無法核對" % (eco, name))
+    return {}, {}, "%s %s %s" % (eco, name, version)
 
 
 # --------------------------------------------------------------------------
@@ -763,9 +869,21 @@ def _parse_marker(body: str):
 
 
 def new_target_for(p: dict, version: str, today, registry: Registry, get=None) -> dict:
-    """Registry-verified target for `version` (index + per-arch digests, artifact sha256s)."""
+    """Verified target for `version`: what the old target records, looked up again for this version.
+
+    image → registry index + per-arch digests; artifacts → the `.sha256` file of
+    upstream.artifact_sha256 (EMQX tarballs) or the PyPI JSON of a package (sdist, wheel);
+    identity integrity / shasum of an npm package → the npm registry. Any other identity (a commit,
+    a build id) cannot be looked up, so the version owner edits the manifest instead. `verified`
+    names where each value came from.
+    """
     up = p.get("upstream") or {}
     old = p.get("target") or {}
+    pkg = split_package(up.get("package"))
+    identity = list(old.get("identity") or {})
+    manual = [k for k in identity if not (pkg and pkg[0] == "npm" and k in NPM_DIST)]
+    if manual:
+        raise WvtError("target.identity（%s）機器人無從查證，請人工更新清冊" % "、".join(manual))
     tag = (up.get("image_tag") or "{version}").format(version=version)
     image = up.get("image")
     res = registry.resolve(image, tag) if image else {"index_digest": None, "platforms": {}}
@@ -779,16 +897,27 @@ def new_target_for(p: dict, version: str, today, registry: Registry, get=None) -
         if missing:
             raise WvtError("%s:%s has no %s image" % (image, tag, "/".join(missing)))
         new["platforms"] = {a: res["platforms"][a] for a in old["platforms"]}
-    sources = ["registry %s:%s" % (image, tag)]
+    sources = ["registry %s:%s" % (image, tag)] if image else []
+    urls = up.get("artifact_sha256") or {}
+    from_pkg, ident = {}, {}
+    if pkg:
+        from_pkg, ident, src = package_fields(pkg, version, [n for n in old.get("artifacts") or {} if n not in urls], identity, get)
+        sources.append(src)
     if old.get("artifacts"):
-        urls = up.get("artifact_sha256") or {}
         new["artifacts"] = {}
         for name in old["artifacts"]:
-            if name not in urls:
+            if name in urls:
+                url = urls[name].format(version=version)
+                new["artifacts"][name] = fetch_sha256_file(url, get)
+                sources.append(url)
+            elif name in from_pkg:
+                new["artifacts"][name] = from_pkg[name]
+            else:
                 raise WvtError("upstream.artifact_sha256.%s missing: cannot verify the artifact" % name)
-            url = urls[name].format(version=version)
-            new["artifacts"][name] = fetch_sha256_file(url, get)
-            sources.append(url)
+    if ident:
+        new["identity"] = ident
+    if not sources:  # neither an image nor a package: nothing was looked up
+        sources = ["%s %s（清冊沒有 image／package，未查證）" % (up.get("source") or "?", version)]
     new["verified"] = "%s wvt propose：%s" % (today.isoformat(), "；".join(sources))
     return new
 
@@ -823,15 +952,26 @@ def plan_propose(m: dict, rep: dict, f, registry: Registry, today, only=None, fo
                     plan["version"] = version
                 except WvtError as exc:
                     plan["notes"].append("查不到 %s 的上游身分：%s" % (version, exc))
-            # a leg that pins a digest must hold the registry's digest for that version
+            # a leg that pins a digest must hold the registry's digest for that version: the rows that
+            # are ahead, and the artifact pins next to them (uv.lock sdist hash, tarball sha256), whose
+            # new digest the manifest does not know yet, so they never read as "ahead" themselves
             if plan["target"]:
-                for r in ahead:
+                spots = {(r["leg"], r["repo"], r["ref"]) for r in ahead if r["version"] == version}
+                near = [r for r in rep["rows"] if r["product"] == pname and r.get("source") == "branch"
+                        and str(r.get("compare")).startswith("artifacts.") and (r["leg"], r["repo"], r["ref"]) in spots
+                        and not any(r is a for a in ahead)]
+                same = []
+                for r in ahead + near:
                     d = (r.get("observed") or {}).get("digest")
                     want = wvt.target_value({"target": plan["target"]}, r["compare"]) if r["compare"] != "version" else None
                     if d and want and d != want:
                         plan["notes"].append("%s 的 digest %s ≠ registry %s：先查清楚再提案" % (r["file"], wvt.short(d), wvt.short(want)))
                         plan["target"], plan["version"] = None, None
                         break
+                    if d and want:
+                        same.append("%s %s" % (wvt.LEG_NAMES[r["leg"]], r["file"]))
+                if plan["target"] and same:
+                    plan["target"]["verified"] += "；與 %s 相同" % "、".join(dict.fromkeys(same))
         for idx, sf in enumerate(p.get("shared_files") or []):
             srow = next((r for r in rep["rows"] if r["product"] == pname and r["pin"] == "shared_source"), None)
             if not srow or srow["status"] != "ahead":
@@ -907,11 +1047,12 @@ def render_propose(m: dict, plan: dict, manifest_rev: str | None) -> tuple:
         t = plan["target"]
         b += ["### %s 清冊目標 %s → %s" % (name, plan["old_version"], plan["version"]), ""]
         b += ["- 為什麼：" + "；".join(plan["reasons"])]
-        b += ["- 上游身分（registry 實查）：index `%s`" % (t.get("index_digest") or "—")]
-        for a, d in (t.get("platforms") or {}).items():
-            b.append("  - %s `%s`" % (a, d))
-        for n, d in (t.get("artifacts") or {}).items():
-            b.append("  - %s `%s`" % (n, d))
+        b += ["- 上游身分：%s" % ((t.get("verified") or "").partition("wvt propose：")[2] or "—")]
+        if t.get("index_digest"):
+            b.append("  - index `%s`" % t["index_digest"])
+        for grp in ("platforms", "artifacts", "identity"):
+            for n, d in (t.get(grp) or {}).items():
+                b.append("  - %s `%s`" % (n, d))
         b.append("- 舊目標 %s 移到 `known_versions`（落後的一邊會顯示「落後」而不是「不符」）。" % plan["old_version"])
         if pol.get("mode") == "range":
             b.append("- range：`target.since` 改為今天，落後天數從今天起算（上限 %s 天）。" % pol.get("max_days_behind"))
