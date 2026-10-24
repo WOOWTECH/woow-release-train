@@ -307,6 +307,49 @@ def github_installation_token(app_id, pem, repo, call=None) -> str:
     return tok["token"]
 
 
+def ha_github_repos(m: dict) -> list:
+    """[(github:OWNER/REPO, fanout on?)] for every HA leg on GitHub, sorted."""
+    seen = {}
+    for p in m["products"].values():
+        legd = (p.get("legs") or {}).get("ha") or {}
+        repo = legd.get("repo") or ""
+        if repo.startswith("github:"):
+            on = (legd.get("fanout") or {}).get("enabled") is not False
+            seen[repo] = seen.get(repo, False) or on
+    return sorted(seen.items())
+
+
+_APP_ERRORS = {401: "App ID 或私鑰不對（GitHub 拒絕 JWT）", 404: "App 沒有安裝在這個 repo",
+               422: "App 權限不夠（要 Contents、Pull requests、Workflows 寫入）"}
+
+
+def github_app_check(m: dict, env, call=None) -> tuple:
+    """(report lines, all ok?): can the GitHub App get a token for every HA repo?
+
+    Each token is revoked right after it is issued; nothing is pushed or opened."""
+    out = ["### GitHub App（fanout_ha 用）"]
+    app_id, key = env.get("WVT_GH_APP_ID"), env.get("WVT_GH_APP_PRIVATE_KEY")
+    if not (app_id and key):
+        return out + ["- 未設定（WVT_GH_APP_ID／WVT_GH_APP_PRIVATE_KEY）：fanout_ha 只能出計畫", ""], False
+    lines, ok = [], 0
+    repos = ha_github_repos(m)
+    for repo, fanout in repos:
+        full = repo.split(":", 1)[1]
+        try:
+            token = github_installation_token(app_id, key, full, call)
+        except WvtError as exc:
+            code = re.search(r"HTTP (\d+)", str(exc))
+            lines.append("- ❌ %s：%s" % (full, _APP_ERRORS.get(int(code.group(1)) if code else 0, str(exc)[:200])))
+            continue
+        ok += 1
+        try:
+            GitHub("https://api.github.com", token, call).call("DELETE", "/installation/token")
+        except WvtError:
+            pass  # an unrevoked token still expires within the hour
+        lines.append("- ✅ %s%s" % (full, "" if fanout else "（清冊 fanout 關閉，只確認安裝）"))
+    return out + ["- %d/%d 個 HA repo 拿得到權杖" % (ok, len(repos))] + lines + [""], ok == len(repos)
+
+
 def git(*args, cwd=None, env=None, check=True):
     r = subprocess.run(["git"] + list(args), cwd=cwd, capture_output=True, text=True, env=env)
     if check and r.returncode != 0:
@@ -1248,13 +1291,20 @@ def run(args, env=None) -> int:
     modes = bot_modes(m)
     if args.mode:
         modes = {b: args.mode for b in modes}
-    selected = BOTS if args.bot == "all" else (args.bot,)
+    selected = () if args.bot == "app-check" else BOTS if args.bot == "all" else (args.bot,)
     rev = wvt._manifest_rev(args.manifest)
-    gitea_api = env.get("GITEA_API_URL", "https://git-prod.woowtech.io/api/v1")
-    f = BotFetcher(gitea_api, env.get("GITEA_READ_TOKEN") or env.get("GITEA_TOKEN"), env.get("GITHUB_TOKEN"))
-    rep = wvt.collect_drift(m, f, today)
     report = ["## woow release train 機器人（%s）" % today.isoformat(), ""]
     rc = 0
+    if args.bot == "app-check" or ("fanout_ha" in selected and modes["fanout_ha"] != "off"):
+        lines, app_ok = github_app_check(m, env)
+        report += lines
+        # a broken App only fails the run when it was asked for, or when fanout_ha should open PRs
+        if not app_ok and (args.bot == "app-check" or ("fanout_ha" in selected and modes["fanout_ha"] == "open-pr")):
+            rc = 1
+    if selected:
+        gitea_api = env.get("GITEA_API_URL", "https://git-prod.woowtech.io/api/v1")
+        f = BotFetcher(gitea_api, env.get("GITEA_READ_TOKEN") or env.get("GITEA_TOKEN"), env.get("GITHUB_TOKEN"))
+        rep = wvt.collect_drift(m, f, today)
     for bot in selected:
         mode = modes[bot]
         if mode == "off":
@@ -1445,7 +1495,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="wvtbot", description=__doc__.split("\n")[0])
     ap.add_argument("--manifest", default=os.environ.get("WVT_MANIFEST", os.path.join(os.path.dirname(here), "woow-versions.yaml")))
     ap.add_argument("--today", help="override today's date (YYYY-MM-DD) for tests")
-    ap.add_argument("--bot", choices=("all",) + BOTS, default="all")
+    ap.add_argument("--bot", choices=("all", "app-check") + BOTS, default="all",
+                    help="app-check = only check that the GitHub App gets a token for every HA repo")
     ap.add_argument("--mode", choices=BOT_MODES, help="override the manifest's bot modes (e.g. dry-run locally)")
     ap.add_argument("--product", default="")
     ap.add_argument("--version", default="", help="propose: put this upstream version up for the product (manual upgrade)")

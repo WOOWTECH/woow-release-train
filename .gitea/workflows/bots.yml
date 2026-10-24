@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
     inputs:
       bot:
-        description: "all／propose／fanout_ha／fanout_paas"
+        description: "all／propose／fanout_ha／fanout_paas／app-check（只檢查 GitHub App 拿不拿得到 6 個 HA repo 的權杖）"
         default: all
       product:
         description: "只處理這個產品（留空＝全部）"

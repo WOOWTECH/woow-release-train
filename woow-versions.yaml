@@ -43,7 +43,7 @@ probes:
 # open-pr＝推機器人分支、開／更新／關閉 PR。機器人永遠不合併、不簽 /approve；改這裡也要開 PR、人工合併。
 bots:
   propose: open-pr        # 某一邊比清冊新 → 本 repo 的清冊 PR（版本負責人合併）
-  fanout_ha: dry-run      # 清冊比 HA 新 → HA repo PR；GitHub App（WVT_GH_APP_ID／WVT_GH_APP_PRIVATE_KEY）建好後改 open-pr
+  fanout_ha: open-pr      # 清冊比 HA 新 → HA repo PR；GitHub App woow-release-train-bot（WOOWTECH，App ID 5449704，裝在 6 個 HA repo）
   fanout_paas: open-pr    # 清冊比 PaaS 新 → mirror-image（人工 /approve）＋PaaS PR；用 CI_GITEA_TOKEN（10-24 決定 A）
 
 products:

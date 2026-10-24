@@ -282,6 +282,76 @@ class GitHubAppJwtTest(unittest.TestCase):
         self.assertEqual(wvtbot.rs256(pem, b"msg"), want)
 
 
+class FakeGitHubApp:
+    """GitHub API stand-in for the App check: per-repo installation answers."""
+
+    def __init__(self, broken=None):
+        self.broken = broken or {}   # repo -> HTTP status of GET /repos/<repo>/installation or the token call
+        self.calls = []
+
+    def __call__(self, method, path, body=None):
+        self.calls.append((method, path))
+        if path.startswith("/repos/") and path.endswith("/installation"):
+            repo = path[len("/repos/"):-len("/installation")]
+            if self.broken.get(repo) in (401, 404):
+                raise wvt.WvtError("github GET %s: HTTP %d {}" % (path, self.broken[repo]))
+            return {"id": 1000 + len(repo), "repo": repo}
+        if path.startswith("/app/installations/"):
+            repo = "WOOWTECH/" + body["repositories"][0]
+            if self.broken.get(repo) == 422:
+                raise wvt.WvtError("github POST %s: HTTP 422 {}" % path)
+            return {"token": "ghs_test_" + body["repositories"][0]}
+        if (method, path) == ("DELETE", "/installation/token"):
+            return None
+        raise AssertionError("unexpected call %s %s" % (method, path))
+
+
+HA_REPOS = ["WOOWTECH/Woow_ha_emqx", "WOOWTECH/Woow_ha_hermes_add_on", "WOOWTECH/Woow_ha_litellm",
+            "WOOWTECH/Woow_ha_mcp_addons", "WOOWTECH/Woow_ha_n8n", "WOOWTECH/Woow_ha_opendesign_add_on"]
+
+
+class GitHubAppCheckTest(unittest.TestCase):
+    def setUp(self):
+        _, _, der = _test_key()
+        self.env = {"WVT_GH_APP_ID": "5449704", "WVT_GH_APP_PRIVATE_KEY": _pem(der, "RSA PRIVATE KEY")}
+
+    def test_the_six_ha_repos_with_their_fanout_switch(self):
+        repos = wvtbot.ha_github_repos(manifest())
+        self.assertEqual([r.split(":", 1)[1] for r, _ in repos], HA_REPOS)
+        self.assertEqual(dict(repos)["github:WOOWTECH/Woow_ha_n8n"], True)
+        self.assertEqual(dict(repos)["github:WOOWTECH/Woow_ha_mcp_addons"], False)   # every MCP product has fanout off
+
+    def test_all_installed_tokens_are_revoked(self):
+        gh = FakeGitHubApp()
+        lines, ok = wvtbot.github_app_check(manifest(), self.env, gh)
+        self.assertTrue(ok)
+        self.assertIn("- 6/6 個 HA repo 拿得到權杖", lines)
+        self.assertEqual(sum(1 for c in gh.calls if c == ("DELETE", "/installation/token")), 6)
+        self.assertTrue(any(l.startswith("- ✅ WOOWTECH/Woow_ha_mcp_addons（") for l in lines))
+        self.assertNotIn("ghs_test_", "\n".join(lines))
+
+    def test_missing_install_and_permissions_are_named(self):
+        gh = FakeGitHubApp({"WOOWTECH/Woow_ha_emqx": 404, "WOOWTECH/Woow_ha_n8n": 422})
+        lines, ok = wvtbot.github_app_check(manifest(), self.env, gh)
+        self.assertFalse(ok)
+        self.assertIn("- 4/6 個 HA repo 拿得到權杖", lines)
+        self.assertIn("- ❌ WOOWTECH/Woow_ha_emqx：App 沒有安裝在這個 repo", lines)
+        self.assertIn("- ❌ WOOWTECH/Woow_ha_n8n：App 權限不夠（要 Contents、Pull requests、Workflows 寫入）", lines)
+
+    def test_wrong_key_is_reported_not_raised(self):
+        lines, ok = wvtbot.github_app_check(manifest(), dict(self.env, WVT_GH_APP_PRIVATE_KEY="not a key"), FakeGitHubApp())
+        self.assertFalse(ok)
+        self.assertIn("- 0/6 個 HA repo 拿得到權杖", lines)
+        self.assertTrue(all("not an RSA PEM key" in l for l in lines if l.startswith("- ❌")))
+
+    def test_unset_secrets(self):
+        gh = FakeGitHubApp()
+        lines, ok = wvtbot.github_app_check(manifest(), {}, gh)
+        self.assertFalse(ok)
+        self.assertTrue(any("未設定" in l for l in lines))
+        self.assertEqual(gh.calls, [])
+
+
 def drift(m, **kw):
     return wvt.collect_drift(m, FakeFetcher(**kw), TODAY)
 
@@ -551,6 +621,22 @@ class RunTest(unittest.TestCase):
             rc = wvtbot.main(["--manifest", MANIFEST_PATH, "--today", "2026-10-24", "--mode", "dry-run", "--bot", "fanout_ha"])
         self.assertEqual(rc, 0)
         self.assertIn("fanout_ha（dry-run）", buf.getvalue())
+
+    def test_app_check_only_touches_github(self):
+        orig_f, orig_c = wvtbot.BotFetcher, wvtbot.github_app_check
+
+        def no_fetch(*a, **k):
+            raise AssertionError("app-check must not read the repos")
+        wvtbot.BotFetcher = no_fetch
+        self.addCleanup(setattr, wvtbot, "BotFetcher", orig_f)
+        self.addCleanup(setattr, wvtbot, "github_app_check", orig_c)
+        for ok, want in ((True, 0), (False, 1)):
+            wvtbot.github_app_check = lambda m, env, _ok=ok: (["### GitHub App（fanout_ha 用）", "- x"], _ok)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = wvtbot.main(["--manifest", MANIFEST_PATH, "--today", "2026-10-24", "--bot", "app-check"])
+            self.assertEqual(rc, want)
+            self.assertIn("### GitHub App", buf.getvalue())
 
     def test_manifest_bot_modes(self):
         m = manifest()
