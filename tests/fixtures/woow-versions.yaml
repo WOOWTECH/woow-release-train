@@ -1,0 +1,829 @@
+# 測試用的凍結快照（2026-10-24 main 5cb9f40 的 woow-versions.yaml），和 tests/fixtures 的檔案配套。
+# 不要跟著線上清冊更新：機器人會改線上清冊，測試要固定的輸入。線上清冊只做格式驗證（test_manifest）。
+# woow-versions.yaml — HA ↔ PaaS 版本清冊（唯一真相來源）
+#
+# 負責人決定（2026-10-15／16，見 README.md）：
+#   - HA 與 PaaS 都對齊這份清冊；Podman／k3s 不在範圍內，不建模。
+#   - lockstep：EMQX、LiteLLM、OpenDesign、MCP servers（之後 code-server）
+#     range：n8n、Hermes、MCP Python SDK（之後 Omnigent、Headscale、Tailscale）
+#   - 第 3 期（2026-10-24）加入 Hermes、OpenDesign、MCP servers：先只觀測，hard_rules 留空，
+#     OpenDesign／MCP 的 fanout 關閉（要人工匯入 core、重算 patch）。
+#   - 第 0 期只報告；第 1 期（2026-10-24 起）兩邊 CI 都跑 `wvt check`，
+#     只有各產品 policy.hard_rules 會擋，其他只警告。
+#
+# 規則：
+#   - 只比「上游身分」（版本＋index digest＋各架構 digest）。add-on 版號、chart 版號、
+#     JCR 時間戳 tag 都是各邊自己的包裝，只列 package_version 參考，不跨邊比較。
+#   - 版本、日期一律加引號（解析器不做隱式型別轉換以外的猜測）。
+#   - 例外必須有理由、核准人、到期日；到期後 `wvt validate` 失敗。
+#   - 改這份檔＝改版本政策：一律開 PR，人工合併。
+#
+# 格式：YAML 子集（區塊 mapping／sequence、單行 flow、引號字串、註解），由
+# tools/wvt.py 內建的解析器讀取（不需 PyYAML）。
+
+schema: 1
+phase: 1            # 0 只報告 → 1 警告＋硬規則 → 2 機器人開 PR → 3 擴大產品
+# 各邊 CI 的 `wvt check` 不帶 --fail-on，照這個值決定擋什麼：
+#   report-only＝都不擋（緊急開關）；hard-rules＝只擋 hard_rules；strict＝任何漂移都擋。
+enforcement: hard-rules
+
+sources:
+  # 正式站 Fleet 釘的平台版（Odoo 映像建自哪個 woow_paas_platform tag）。
+  # 該 tag 只寫在 image 區塊的註解（"Built from addon_ref v18.0.1.0.NNN"），
+  # wvt 讀第一個出現的 addon_ref；讀不到就只比 develop 並在報告備註。
+  prod_platform:
+    repo: "gitea:woow-paas/paas-app-bundle-cd"
+    file: paas-odoo-platform/values-prod.yaml
+    ref: main
+    kind: cd_addon_ref
+
+# 只測連線、不影響漂移判定：第 2 期機器人要從 Gitea runner 打 GitHub API 開 PR。
+probes:
+  api.github.com: https://api.github.com/rate_limit
+
+# 第 2 期機器人（tools/wvtbot.py，.gitea/workflows/bots.yml）。off＝不做；dry-run＝只在 Actions 摘要列計畫；
+# open-pr＝推機器人分支、開／更新／關閉 PR。機器人永遠不合併、不簽 /approve；改這裡也要開 PR、人工合併。
+bots:
+  propose: open-pr        # 某一邊比清冊新 → 本 repo 的清冊 PR（版本負責人合併）
+  fanout_ha: dry-run      # 清冊比 HA 新 → HA repo PR；GitHub App（WVT_GH_APP_ID／WVT_GH_APP_PRIVATE_KEY）建好後改 open-pr
+  fanout_paas: dry-run    # 清冊比 PaaS 新 → mirror-image（人工 /approve）＋PaaS PR；Gitea 機器人帳號定案後改 open-pr
+
+products:
+
+  # ------------------------------------------------------------------ EMQX
+  emqx:
+    display_name: EMQX
+    upstream:
+      image: docker.io/emqx/emqx
+      source: "github:emqx/emqx"
+      artifact_sha256:   # HA 自建用的官方 tarball；propose 從這裡取新版的 sha256
+        debian13-amd64: "https://github.com/emqx/emqx/releases/download/v{version}/emqx-{version}-debian13-amd64.tar.gz.sha256"
+        debian13-arm64: "https://github.com/emqx/emqx/releases/download/v{version}/emqx-{version}-debian13-arm64.tar.gz.sha256"
+    policy:
+      mode: lockstep
+      license_ceiling: "<5.9.0"   # 5.9+ 是 BSL-1.1（woow-paas-charts charts/emqx/Chart.yaml 描述）
+      downgrade: allowed
+      hard_rules: [license_ceiling, exception_expired]   # 第 1 期起生效
+    target:
+      version: "5.8.9"
+      since: "2026-10-02"
+      index_digest: "sha256:35b46f7aa7a0d51f3959e4344221ac5ec7f948b03e43099286b6c40a07bb393b"
+      platforms:
+        amd64: "sha256:8b92a101d1a1642a191507b9133c46aad095bb64300dba1770108a2c7261b11a"
+        arm64: "sha256:c455c60feced3452a5fa81a761f840983039118b1c126fdad6c86f93467a3be5"
+      artifacts:
+        # HA 不用映像，而是下載官方 tarball 自建；sha256 取自上游 release 的 .sha256 檔
+        debian13-amd64: "sha256:c3b5a8f7c83601867d0fc1ef19a851f6f16f56a9436de74cb05f81f188a44a90"
+        debian13-arm64: "sha256:524b5dd8ccad1f7dc5e5c15171328618e1ea7703fed56e17006a27258a13ecd4"
+      verified: "2026-10-16 crane manifest docker.io/emqx/emqx:5.8.9；tarball sha256 對照 github.com/emqx/emqx/releases/download/v5.8.9/*.sha256"
+    legs:
+      ha:
+        repo: "github:WOOWTECH/Woow_ha_emqx"
+        ref: main
+        pins:
+          - id: upstream
+            label: 上游版本
+            file: emqx/Dockerfile
+            kind: dockerfile_arg
+            name: EMQX_VERSION
+            strip_v: true
+            compare: version
+          - id: tarball-amd64
+            label: tarball sha256（amd64）
+            file: emqx/Dockerfile
+            kind: dockerfile_arg
+            name: EMQX_SHA256_AMD64
+            parse: digest
+            compare: artifacts.debian13-amd64
+          - id: tarball-arm64
+            label: tarball sha256（arm64）
+            file: emqx/Dockerfile
+            kind: dockerfile_arg
+            name: EMQX_SHA256_ARM64
+            parse: digest
+            compare: artifacts.debian13-arm64
+        package_version:
+          - label: add-on 版號
+            file: emqx/config.yaml
+            kind: yaml
+            path: version
+            bump: patch          # fanout：上游換版時 add-on +0.0.1（5.9.1 包 5.8.9，不跟上游同號）
+            note: "add-on 版號 ≠ 上游版號（5.9.1 包 5.8.9；Store 拒絕降版）；授權上限只看上游"
+        fanout:
+          changelog: emqx/CHANGELOG.md
+        published:
+          kind: catalog
+          repo: "github:WOOWTECH/Woow_HA_App_Store"
+          file: .addon-sync/catalog.json
+          id: woow-emqx
+      paas:
+        pins:
+          - id: seed
+            label: 平台範本 seed
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_image
+            record: cloud_app_emqx
+            compare: platforms.amd64
+          - id: chart
+            label: chart appVersion
+            repo: "gitea:woow-paas/woow-paas-charts"
+            ref: main
+            file: charts/emqx/Chart.yaml
+            kind: yaml
+            path: appVersion
+            compare: version
+        mirror:                  # seed 釘 JCR 的 tag@amd64 digest：fanout 先 dispatch mirror-image
+          dest_name: emqx
+          digest: platforms.amd64
+        package_version:
+          - label: seed chart 版號
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_field
+            record: cloud_app_emqx
+            field: helm_chart_version
+          - label: charts 已發佈版號
+            repo: "gitea:woow-paas/woow-paas-charts"
+            ref: main
+            file: charts/emqx/Chart.yaml
+            kind: yaml
+            path: version
+            bump: patch
+    exceptions: []
+
+  # --------------------------------------------------------------- LiteLLM
+  litellm:
+    display_name: LiteLLM
+    upstream:
+      image: ghcr.io/berriai/litellm-non_root
+      source: "github:BerriAI/litellm"
+    policy:
+      mode: lockstep
+      downgrade: allowed
+      hard_rules: [digest, shared_files, exception_expired]   # 第 1 期起生效
+    target:
+      version: "1.104.0"
+      since: "2026-10-10"
+      index_digest: "sha256:37066242e6b8327fdd627682a66a9ae2a599553b4d5a84c905c6d8b9eb35c01e"
+      platforms:
+        amd64: "sha256:843a35c72a832e9c062b66111b1aa54e6588fb32c3ab400d3e20ea9c5fa656a0"
+        arm64: "sha256:fdac774ed3b9bc1e00a04469d960fc5655e42289d7997a8afff0d64b45dc753e"
+      verified: "2026-10-16 crane manifest ghcr.io/berriai/litellm-non_root:1.104.0"
+    shared_files:
+      # Woow 外掛（ChatGPT 訂閱等）由 charts 單一來源，HA 逐位元組複製並寫 lock。
+      # charts main 另有 PaaS 專用的 woow_revoke_ui_sessions.py，不在共用清單內。
+      # 來源（PaaS）可以先改：charts 的 CI 對改過的共用檔只警告；合併後開清冊 PR 換 commit／blobs，
+      # 舊的一組移到 known_commits（HA 的 lock 停在舊 commit 只算落後，不擋 HA 其他 PR）。
+      - source:
+          leg: paas
+          repo: "gitea:woow-paas/woow-paas-charts"
+          path: charts/litellm/files/
+          branch: main
+          commit: "4ad95a11d8dad671b342d6cc9454c87a3130e8b6"
+          require_on_main: true
+          files: [sitecustomize.py, woow_chatgpt.py, woow_chatgpt_plugin.py]
+          blobs:   # git blob（git rev-parse <commit>:<path><file>）
+            sitecustomize.py: "f5407aacd4ed0d0202da7d6c578ef6a267b8a45b"
+            woow_chatgpt.py: "527c16c68a83958cc2f124253632b98de20b56c6"
+            woow_chatgpt_plugin.py: "cfcd0f65c257f44db3e995ea6fd635e76c7255f3"
+        known_commits: []
+        consumers:
+          - leg: ha
+            repo: "github:WOOWTECH/Woow_ha_litellm"
+            lock: litellm/woow-plugin.lock.json
+    legs:
+      ha:
+        repo: "github:WOOWTECH/Woow_ha_litellm"
+        ref: main
+        pins:
+          - id: base-image
+            label: 上游 base 映像
+            file: litellm/Dockerfile
+            kind: dockerfile_arg
+            name: LITELLM_IMAGE
+            parse: image_ref
+            compare: index_digest
+          # Dockerfile 的每個釘點都必須等於 upstream.lock.json（HA repo tests/test_config_contract.py）
+          - id: lock-tag
+            label: upstream.lock.json tag
+            file: litellm/upstream.lock.json
+            kind: json
+            path: tag
+            compare: version
+          - id: lock-version
+            label: upstream.lock.json litellm_version
+            file: litellm/upstream.lock.json
+            kind: json
+            path: litellm_version
+            compare: version
+          - id: lock-index
+            label: upstream.lock.json index_digest
+            file: litellm/upstream.lock.json
+            kind: json
+            path: index_digest
+            parse: digest
+            compare: index_digest
+        package_version:
+          - label: add-on 版號
+            file: litellm/config.yaml
+            kind: yaml
+            path: version
+            bump: patch
+            note: "私人映像，只裝公司 HA，不在 Store catalog"
+        fanout:
+          changelog: litellm/CHANGELOG.md
+          changelog_entry: "- 上游 {name} {old} → {new}（woow release train 清冊）。合併前請改成實際變更說明。"
+          changelog_shared: "- Woow 外掛同步到 woow-paas-charts {commit}（woow release train 清冊）。合併前請改成實際變更說明。"
+      paas:
+        pins:
+          - id: ci-base
+            label: paas-odoo-ci 建置 base
+            repo: "gitea:woow-paas/paas-odoo-ci"
+            ref: main
+            file: litellm/Dockerfile
+            kind: dockerfile_arg
+            name: BASE
+            parse: image_ref
+            compare: index_digest
+          - id: chart-digest
+            label: chart values 上游 digest
+            repo: "gitea:woow-paas/woow-paas-charts"
+            ref: main
+            file: charts/litellm/values.yaml
+            kind: yaml
+            path: image.digest
+            parse: digest
+            compare: index_digest
+            mirror: true           # values 指向 JCR：新 digest 要先鏡像
+          - id: chart-tag
+            label: chart values JCR tag（fanout 一起改）
+            repo: "gitea:woow-paas/woow-paas-charts"
+            ref: main
+            file: charts/litellm/values.yaml
+            kind: yaml
+            path: image.tag
+            compare: info
+            write: "{jcr_tag}"
+          - id: chart
+            label: chart appVersion
+            repo: "gitea:woow-paas/woow-paas-charts"
+            ref: main
+            file: charts/litellm/Chart.yaml
+            kind: yaml
+            path: appVersion
+            compare: version
+          - id: seed-wrapper
+            label: seed 映像（Woow 包裝，非上游身分）
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_image
+            record: cloud_app_litellm
+            compare: info
+        package_version:
+          - label: seed chart 版號
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_field
+            record: cloud_app_litellm
+            field: helm_chart_version
+          - label: charts 已發佈版號
+            repo: "gitea:woow-paas/woow-paas-charts"
+            ref: main
+            file: charts/litellm/Chart.yaml
+            kind: yaml
+            path: version
+            bump: patch
+        mirror:
+          dest_name: litellm
+          digest: index_digest
+    exceptions:
+      - leg: ha
+        what: "ChatGPT Responses 相容修補（Woow_ha_litellm UPSTREAM.md）"
+        reason: "HA 2026-10-13 驗收重現三個 ChatGPT /v1/responses 問題；修補尚未經 PaaS 覆核，base digest 兩邊仍相同"
+        approved_by: "負責人（2026-10-16 第 0 期決定）"
+        expires: "2026-11-15"
+
+  # ------------------------------------------------------------------- n8n
+  n8n:
+    display_name: n8n
+    upstream:
+      image: docker.io/n8nio/n8n
+      source: "github:n8n-io/n8n"
+      tag_pattern: "n8n@{version}"
+    policy:
+      mode: range
+      min_version: "2.38.0"       # n8n#37006 修正（Respond 節點前失敗卻回 HTTP 200）；seed 註解
+      max_days_behind: 30
+      downgrade: forbidden        # 資料庫遷移單向（Woow_ha_n8n README）
+      upgrade_evidence: required  # clone→升級→還原的證據，比照 woow_paas_platform docs/verification
+      hard_rules: []              # range 產品第 1 期仍只警告
+    target:
+      version: "2.43.6"
+      since: "2026-10-15"         # HA add-on 2.43.6 發佈日
+      index_digest: "sha256:dd580fe1ab6e99e85bc66f2acf8bc8c5e9409fbe61b2e2803c5024403ef52833"
+      platforms:
+        amd64: "sha256:371dd463f02e8c35a4bc5aaf9855fc4cfec1babab97e5a02a1e31923a2ec8f5a"
+        arm64: "sha256:4648e019655401905bd394a3bf448f8abaca900bd2722a5770c375df2762b6ca"
+      verified: "2026-10-16 crane manifest docker.io/n8nio/n8n:2.43.6"
+    known_versions:
+      # 讓 drift 能把 PaaS 釘的 digest 換算回版本（皆 2026-10-16 crane 驗證）
+      - version: "2.38.0"
+        index_digest: "sha256:fd3494ec0a86809cb02120143ef7800518c81dc926a5c9f0ff808e3922a725ef"
+        platforms:
+          amd64: "sha256:e0e7b603b43adc48d7123716b9eee7394dca675b410f574e4d24830e114564ce"
+          arm64: "sha256:3a6320c22455fe191adef6220e7e4a53c1dbd89691ca1d0b77cb2f7c882362be"
+      - version: "2.35.3"
+        index_digest: "sha256:31375a4f730081a139bba2d379bf2efaa8e662cc9e131d12bb5e15859d4f0282"
+        platforms:
+          amd64: "sha256:a3693cff4b9fff5ffce6d20470f2d87a905c073c0de46ea65404e89947c6dfa2"
+          arm64: "sha256:91d70791dfa78b5bd9fe2c5d49a11120efa62a8cfad7d74367cea6f47b26a27a"
+    legs:
+      ha:
+        repo: "github:WOOWTECH/Woow_ha_n8n"
+        ref: main
+        pins:
+          - id: upstream
+            label: 上游版本
+            file: n8n/Dockerfile
+            kind: dockerfile_arg
+            name: N8N_UPSTREAM_VERSION
+            compare: version
+        package_version:
+          - label: add-on 版號
+            file: n8n/config.yaml
+            kind: yaml
+            path: version
+            bump: same           # n8n add-on 版號＝上游版號
+          - label: 建置版號（BUILD_VERSION）
+            file: n8n/Dockerfile
+            kind: dockerfile_arg
+            name: BUILD_VERSION
+            bump: same
+        fanout:
+          changelog: n8n/CHANGELOG.md
+        published:
+          kind: catalog
+          repo: "github:WOOWTECH/Woow_HA_App_Store"
+          file: .addon-sync/catalog.json
+          id: woow-n8n
+      paas:
+        pins:
+          - id: seed
+            label: 平台範本 seed
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_image
+            record: cloud_app_n8n
+            compare: platforms.amd64
+        mirror:
+          dest_name: n8n
+          digest: platforms.amd64
+        package_version:
+          - label: 外部 chart（8gears）版號
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            file: src/data/cloud_app_templates.xml
+            kind: seed_field
+            record: cloud_app_n8n
+            field: helm_chart_version
+            note: "8gears 2.0.1 沒有 startupProbe（seed 以 liveness initialDelay 補）"
+    exceptions: []
+    notes:
+      - "PaaS 已於 10-16 隨平台 .243 升到 2.43.6（JCR n8n:20261015.2215 ← docker.io/n8nio/n8n@sha256:371dd463…，amd64）；遷移單向，既有服務逐台備份後 Redeploy。"
+
+  # ================================================================ Hermes
+  # 上游身分＝docker.io/nousresearch/hermes-agent 的 index digest。HA 直接 FROM；PaaS 在 paas-odoo-ci
+  # 以同一 digest 為底建 Woow 衍生映像（seed 釘的是衍生映像，不是上游 digest，所以 seed 只列參考）。
+  hermes:
+    display_name: Hermes Agent
+    upstream:
+      image: docker.io/nousresearch/hermes-agent
+      source: "github:NousResearch/hermes-agent"
+      tag_pattern: "v{version}"     # v0.21.0 以前是日曆 tag（v2026.8.31＝v0.21.0）；上游 tag 會被重推，一律以 digest 為準
+      image_tag: "v{version}"       # propose 到 registry 查的 tag
+    policy:
+      mode: range
+      min_version: "0.22.5"         # 已驗證內含 X-FIX-CVE 全部 8 項相依修補（paas-odoo-ci hermes-agent/Dockerfile:80；0.21.6 靠 hash 鎖定 overlay，4749031 已移除）
+      max_days_behind: 30
+      downgrade: forbidden          # state.db／config schema 單向（HA CHANGELOG 0.1.10 末句；seed 0.3.6 註解）
+      upgrade_evidence: required
+      hard_rules: []
+    target:
+      version: "0.22.5"
+      since: "2026-10-23"           # 上游 release 2026-10-23T05:28Z；HA add-on 0.1.10 同日發佈
+      index_digest: "sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d"
+      platforms:
+        amd64: "sha256:fd822bae0a61bf023450737edbeaeea5fc6460f17cb4ee240a7e67b306ed63fb"
+        arm64: "sha256:41f1cfdd2486b38ca55453a28785910b498ee184e71eed4f2d7ee3f908aa7236"
+      verified: "2026-10-23T22:32Z crane manifest docker.io/nousresearch/hermes-agent:v0.22.5（stable／latest 同 digest；release commit bf0203a7…）"
+    known_versions:
+      - version: "0.21.6"           # PaaS CI 2026-10-11～10-23 的基底（claim tag rc.4-v0.21.6；上游 v0.21.6 tag 現指向 55e192fb…）
+        index_digest: "sha256:9774f4f39a9bb8c2f68ce728ed5e99ddbad282163be56764afacf88ed952b784"
+        platforms:
+          amd64: "sha256:ffa4fbb471c2bc8c85fbcfc629347585cc1586c86d2e6db465d01203ce696d95"
+          arm64: "sha256:7e36c10955df8bf957fbb034279770db17c5feab1733637608d1a1d9aceb8193"
+      - version: "0.21.0"           # HA add-on 0.1.0～0.1.9 的基底（tag v2026.8.31）
+        index_digest: "sha256:64923faeae267792bf9bf87fe3b4c4869e35004e360c7df01730ad801b74d524"
+        platforms:
+          amd64: "sha256:87af7c6a5ee383834f75eb9a3fb509ccaacbab5d54084b086b48b84917e28efc"
+          arm64: "sha256:c64666f62179b6cd7d2df3348a30907b383a82a8e0d2400083b8004e24615780"
+    legs:
+      ha:
+        repo: "github:WOOWTECH/Woow_ha_hermes_add_on"
+        ref: main
+        pins:
+          - {id: base-image, label: 上游 base 映像（tag＋digest）, file: hermes/Dockerfile, kind: dockerfile_arg, name: HERMES_BASE, parse: image_ref, compare: index_digest}
+        package_version:
+          - {label: add-on 版號, file: hermes/config.yaml, kind: yaml, path: version, bump: patch}
+        fanout: {changelog: hermes/CHANGELOG.md}
+        published: {kind: catalog, repo: "github:WOOWTECH/Woow_HA_App_Store", file: .addon-sync/catalog.json, id: woow-hermes}
+      paas:
+        pins:
+          - {id: ci-base, label: paas-odoo-ci 建置 base（FROM digest）, repo: "gitea:woow-paas/paas-odoo-ci", ref: main, file: hermes-agent/Dockerfile, kind: dockerfile_from, parse: image_ref, compare: index_digest}
+          - {id: chart, label: chart appVersion, repo: "gitea:woow-paas/woow-paas-charts", ref: main, file: charts/hermes-agent/Chart.yaml, kind: yaml, path: appVersion, compare: version}
+          - id: seed-wrapper
+            label: seed 映像（Woow 衍生，非上游身分）
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_image
+            record: cloud_app_hermes_agent
+            compare: info
+        package_version:
+          - label: seed chart 版號
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_field
+            record: cloud_app_hermes_agent
+            field: helm_chart_version
+          - {label: charts 已發佈版號, repo: "gitea:woow-paas/woow-paas-charts", ref: main, file: charts/hermes-agent/Chart.yaml, kind: yaml, path: version, bump: patch}
+    exceptions: []
+    notes:
+      - "PaaS 正式站 seed（v18.0.1.0.253）仍是 chart 0.3.12＋映像 20261018.0829（0.21.6 基底）；develop／v18.0.1.0.255 已是 0.3.13＋20261023.1631（0.22.5 基底）。"
+      - "seed 衍生映像的 base digest 只存在映像 label io.woow.base.digest（需 JCR 憑證），所以 PaaS 的上游身分看 paas-odoo-ci FROM＋charts appVersion。"
+
+  # ============================================================= OpenDesign
+  # 共用核心 open-design-core：PaaS 每次建置都重建並以「與外殼相同的 tag」發佈；HA 的 Import open-design-core
+  # workflow 依 digest 複製到 ghcr.io/woowtech/open-design-core。version 用 core build id（＝tag），上游版本與 fork commit 放 identity。
+  opendesign:
+    display_name: OpenDesign（WoowTech core）
+    upstream:
+      image: ghcr.io/woowtech/open-design-core
+      source: "gitea:woow-paas/open-design"      # WoowTech fork；上游 github:nexu-io/open-design（open-design-v0.24.1）
+    policy:
+      mode: lockstep
+      downgrade: allowed
+      hard_rules: []
+    target:
+      version: "20261018.1219"      # core build id（core tag＝PaaS 外殼 tag）
+      since: "2026-10-18"
+      platforms:
+        amd64: "sha256:f349632632e0c3fa9e546da8e83f89aa60d283d473fdf47fffa5728e01cde023"   # 單一架構 manifest（不是 index）
+      identity:
+        upstream_version: "0.24.1"
+        fork_commit: "1c7e697ef8a3d0aadd7b736b7110a3df83cf6ff5"        # woow-od-v0.24.1-w2.2
+        upstream_commit: "89e64d813bb1c7a11519b3f668f011f7017637d7"    # open-design-v0.24.1
+      verified: "20261018.1219 的 digest 取自 Gitea Actions run 23032 job 25290 的 promoted／open-design-core digest notice（JCR 不可直讀）；20261015.0617 以 crane 查 GHCR（2026-10-23T22:35Z）"
+    known_versions:
+      - {version: "20261015.0617", platforms: {amd64: "sha256:c5496453136b5ddc1ec3376c0f7518bfb2ba5091ff1ba75bfadf645d1c52a683"}}   # HA 0.2.1～0.2.2 現用；無 OD_APP_VERSION（/api/version 回 0.23.1）
+      - {version: "20261014.1921", platforms: {amd64: "sha256:bfec7cc6c96b559506f33dce9296d9c2e02e9acbb0fe543ad434ea66370baf35"}}   # GHCR 別名 0.24.1-w2.1
+    legs:
+      ha:
+        repo: "github:WOOWTECH/Woow_ha_opendesign_add_on"
+        ref: main
+        pins:
+          - {id: core-image, label: core 映像（Dockerfile，tag＋digest）, file: Dockerfile, kind: dockerfile_arg, name: BUILD_FROM, parse: image_ref, compare: platforms.amd64}
+          - {id: core-image-ci, label: core 映像（build.yml CORE_IMAGE）, file: .github/workflows/build.yml, kind: yaml, path: env.CORE_IMAGE, parse: image_ref, compare: platforms.amd64}
+          - {id: core-tag-dev, label: core tag（build.yaml，本機建置路徑）, file: build.yaml, kind: yaml, path: build_from.amd64, parse: image_ref, compare: version}
+          - {id: core-contract-version, label: core 契約的 OpenDesign 版本, file: Dockerfile, kind: dockerfile_arg, name: CORE_OPENDESIGN_VERSION, compare: identity.upstream_version}
+        package_version:
+          - {label: add-on 版號, file: config.yaml, kind: yaml, path: version}
+        published: {kind: catalog, repo: "github:WOOWTECH/Woow_HA_App_Store", file: .addon-sync/catalog.json, id: woow_ha_opendesign}
+        fanout: {enabled: false, reason: "HA 先用 Import open-design-core workflow 把 core 匯入 GHCR，再跑 .github/scripts/pin-core.sh"}
+      paas:
+        pins:
+          - id: shell-tag
+            label: seed 外殼映像 tag（＝同一次建置的 core tag）
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_image
+            record: cloud_app_opendesign
+            tag_as_version: true
+            compare: version
+          - {id: fork-commit, label: fork commit（od-source.env）, repo: "gitea:woow-paas/paas-odoo-ci", ref: main, file: open-design/od-source.env, kind: regex, pattern: '^OD_SOURCE_SHA=([0-9a-f]{40})\s*$', compare: identity.fork_commit}
+          - {id: upstream-version, label: 上游 OpenDesign 版本（od-source.env）, repo: "gitea:woow-paas/paas-odoo-ci", ref: main, file: open-design/od-source.env, kind: regex, pattern: '^OD_UPSTREAM_VERSION=(\S+)\s*$', compare: identity.upstream_version}
+          - {id: chart, label: chart appVersion, repo: "gitea:woow-paas/woow-paas-charts", ref: main, file: charts/open-design/Chart.yaml, kind: yaml, path: appVersion, compare: identity.upstream_version}
+        package_version:
+          - label: seed chart 版號
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_field
+            record: cloud_app_opendesign
+            field: helm_chart_version
+          - {label: charts 已發佈版號, repo: "gitea:woow-paas/woow-paas-charts", ref: main, file: charts/open-design/Chart.yaml, kind: yaml, path: version}
+        fanout: {enabled: false, reason: "core 由 paas-odoo-ci 每次建置重建，版本由 od-source.env 決定"}
+    exceptions: []
+    notes:
+      - "目標取 PaaS 目前的 20261018.1219（多了 OD_APP_VERSION，/api/version 回 0.24.1）。HA 仍是 20261015.0617：到 HA repo Actions 跑 Import open-design-core（tag 20261018.1219、digest 如上）再 .github/scripts/pin-core.sh。兩顆 core 的 fork commit、CLI 版本相同，差別只有 OD_APP_VERSION；外殼的 MCP runtime 也相同（PaaS 複製 HA 200e8cbb，65 個檔案的 sha256 與 HA 現況逐檔一致）。若要以 HA 現況為目標，改成 20261015.0617／c5496453…，PaaS 會顯示『領先』。"
+      - "PaaS repo 內沒有 core digest（seed 釘外殼 digest 52423ef6…），所以 PaaS 只能比 build id；建議 paas-odoo-ci 在核可後寫一份 core digest 檔，才能對 digest 做硬規則。"
+      - "上游已到 0.26.1（2026-10-22），fork 仍在 0.24.1；升 fork 時 target 一次改兩邊。"
+
+  # ============================================================== MCP 家族
+  # HA＝WOOWTECH/Woow_ha_mcp_addons（預設分支 claude-delivery；程式在 apps/<p>、apps/runtime、packages/）。
+  # PaaS＝Gitea WOOWTECH/woow-mcp-server main（Gitea 是來源，GitHub 私人庫每小時鏡像，兩邊 26 個 ref 相同）。
+  # 建議 lockstep：兩邊都對上游版本打『版本專屬』patch 並有 digest／工具清單守線，落後等於跑不同程式，不是「舊一點」。
+  mcp-n8n:
+    display_name: n8n MCP（n8n-mcp）
+    upstream: {package: "npm:n8n-mcp", source: "github:czlonkowski/n8n-mcp"}
+    policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
+    target:
+      version: "2.92.1"
+      since: "2026-10-06"           # npm 發佈日
+      verified: "2026-10-23T22:41Z registry.npmjs.org/n8n-mcp（2.92.1 integrity sha512-cnNxuA/…；latest 已是 2.96.2）"
+    legs:
+      ha:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "github:WOOWTECH/Woow_ha_mcp_addons"
+        ref: claude-delivery
+        pins:
+          - {id: package-json, label: package.json 相依, file: apps/n8n/package.json, kind: json, path: dependencies.n8n-mcp, compare: version}
+          - {id: package-lock, label: package-lock.json 鎖定, file: apps/n8n/package-lock.json, kind: json, path: "packages.node_modules/n8n-mcp.version", compare: version}
+        package_version:
+          - {label: add-on 版號, file: addons/n8n/config.yaml, kind: yaml, path: version}
+        published: {kind: catalog, repo: "github:WOOWTECH/Woow_HA_App_Store", file: .addon-sync/catalog.json, id: woow_mcp_n8n}
+      paas:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "gitea:WOOWTECH/woow-mcp-server"
+        ref: main
+        pins:
+          - {id: image-arg, label: Dockerfile N8N_MCP_VERSION, file: apps/n8n/Dockerfile, kind: dockerfile_arg, name: N8N_MCP_VERSION, compare: version}
+          - {id: patch-guard-result, label: isError patch 的版本守線, file: apps/n8n/n8n_mcp_admin/upstream_result_patch.py, kind: regex, pattern: '^VERSION = "([^"]+)"', compare: version}
+          - {id: patch-guard-direct, label: direct inputs patch 的版本守線, file: apps/n8n/n8n_mcp_admin/upstream_direct_patch.py, kind: regex, pattern: '^VERSION = "([^"]+)"', compare: version}
+          - id: seed-wrapper
+            label: seed 映像（tag＝woow-mcp-server commit，非上游身分）
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_image
+            record: cloud_app_mcp_n8n
+            compare: info
+    exceptions: []
+    # 建議例外（負責人核准後再解除註解）：
+    #   - {leg: ha, what: "n8n-mcp 2.91.0→2.92.1", reason: "HA patch digest（fix_test_run_error_messages.py PINNED／PATCHED）與 tool_snapshot 需對 2.92.1 重審", approved_by: "<負責人>", expires: "2026-11-07", waives: [behind]}
+    notes:
+      - "HA 釘 2.91.0（package.json:7、package-lock.json:1163），PaaS 釘 2.92.1（Dockerfile:27）。兩邊都對該版 dist/ 檔做位元組 patch 並在不符時拒絕啟動，升版要兩邊各自重算 digest。"
+      - "n8n-mcp 2.91.0／2.92.1 的 npm 相依都釘 @modelcontextprotocol/sdk 1.30.0；HA 用 overrides 升到 1.31.0（GHSA-6qxp-vccf-f47h），PaaS 沒有。"
+
+  mcp-odoo:
+    display_name: Odoo MCP（odoo-mcp）
+    upstream: {package: "pypi:odoo-mcp", source: "github:tuanle96/mcp-odoo"}
+    policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
+    target:
+      version: "1.1.0"
+      since: "2026-07-02"           # PyPI 上傳日
+      artifacts: {sdist: "sha256:335ff70d850af6a13416869217c656089032759624b6fe60b22732dc7b29debb"}   # odoo_mcp-1.1.0.tar.gz
+      verified: "2026-10-24 兩邊 uv.lock 的 sdist hash 相同；PyPI 最新 1.3.0（2026-07-29）"
+    legs:
+      ha:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "github:WOOWTECH/Woow_ha_mcp_addons"
+        ref: claude-delivery
+        pins:
+          - {id: pyproject, label: apps/odoo/pyproject.toml 相依, file: apps/odoo/pyproject.toml, kind: pep508, package: odoo-mcp, compare: version}
+          - {id: uv-lock, label: apps/odoo/uv.lock 鎖定, file: apps/odoo/uv.lock, kind: uv_lock, package: odoo-mcp, compare: version}
+          - {id: uv-lock-sdist, label: uv.lock sdist hash, file: apps/odoo/uv.lock, kind: uv_lock, package: odoo-mcp, field: sdist_sha256, parse: digest, compare: artifacts.sdist}
+        package_version:
+          - {label: add-on 版號, file: addons/odoo/config.yaml, kind: yaml, path: version}
+        published: {kind: catalog, repo: "github:WOOWTECH/Woow_HA_App_Store", file: .addon-sync/catalog.json, id: woow_mcp_odoo}
+      paas:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "gitea:WOOWTECH/woow-mcp-server"
+        ref: main
+        pins:
+          - {id: pyproject, label: apps/odoo/pyproject.toml 相依, file: apps/odoo/pyproject.toml, kind: pep508, package: odoo-mcp, compare: version}
+          - {id: uv-lock, label: 根 uv.lock 鎖定, file: uv.lock, kind: uv_lock, package: odoo-mcp, compare: version}
+          - {id: uv-lock-sdist, label: 根 uv.lock sdist hash, file: uv.lock, kind: uv_lock, package: odoo-mcp, field: sdist_sha256, parse: digest, compare: artifacts.sdist}
+          - id: seed-wrapper
+            label: seed 映像（tag＝woow-mcp-server commit，非上游身分）
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_image
+            record: cloud_app_mcp_odoo
+            compare: info
+    exceptions: []
+    notes:
+      - "上游身分一致（odoo-mcp 1.1.0）。patch 組合不同屬包裝差異：HA 2 支（cross_session_token_store、direct_writes），PaaS 3 支（另有 fix_remove_3step_tools）加 4 個執行期修補（upstream_fixes、result_limits、tool_errors、concurrency）。"
+
+  mcp-litellm:
+    display_name: LiteLLM MCP（Woow_litellm_mcp_server）
+    upstream: {source: "github:WOOWTECH/Woow_litellm_mcp_server"}   # WoowTech 自有、MIT；兩邊都 vendor
+    policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
+    target:
+      version: "0.1.0"              # 套件 __version__（自首版沒變過，不能單獨當身分）
+      since: "2026-09-13"           # commit 日期
+      artifacts: {server_py: "sha256:85c3cb8f6d50bed817279754c16309919bdf419f8193b6291f47f08f80db89f7"}   # woow_litellm_mcp_server/server.py @4d41903
+      identity: {source_commit: "4d4190369216a2d068d1100d53406a67a1d81609"}
+      verified: "2026-10-24 本機比對：PaaS apps/litellm 20 個檔案的 sha256 全部等於 HA runtime-sources.json 記載的 upstream_sha256；來源 repo main 仍是 4d41903"
+    legs:
+      ha:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "github:WOOWTECH/Woow_ha_mcp_addons"
+        ref: claude-delivery
+        pins:
+          - {id: source-commit, label: vendor 來源 commit（runtime-sources.json）, file: docs/provenance/runtime-sources.json, kind: json_select, where: {product: litellm}, field: source, extract: '([0-9a-f]{40})$', compare: identity.source_commit}
+          - {id: package-version, label: 套件 __version__, file: apps/litellm/vendor/woow_litellm_mcp_server/__init__.py, kind: regex, pattern: '^__version__ = "([^"]+)"', compare: version}
+          - {id: server-py, label: server.py 來源 sha256（runtime-sources.json）, file: docs/provenance/runtime-sources.json, kind: json_select, where: {product: litellm, path: woow_litellm_mcp_server/server.py}, field: upstream_sha256, parse: digest, compare: artifacts.server_py}
+        package_version:
+          - {label: add-on 版號, file: addons/litellm/config.yaml, kind: yaml, path: version}
+        published: {kind: catalog, repo: "github:WOOWTECH/Woow_HA_App_Store", file: .addon-sync/catalog.json, id: woow_mcp_litellm}
+      paas:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "gitea:WOOWTECH/woow-mcp-server"
+        ref: main
+        pins:
+          - {id: source-commit, label: vendor 來源 commit（README 首段，短 sha）, file: apps/litellm/README.md, kind: regex, pattern: 'Woow_litellm_mcp_server` main `([0-9a-f]{7,40})`', match: prefix, compare: identity.source_commit}
+          - {id: package-version, label: 套件 __version__, file: apps/litellm/woow_litellm_mcp_server/__init__.py, kind: regex, pattern: '^__version__ = "([^"]+)"', compare: version}
+          - {id: server-py, label: server.py 內容 sha256, file: apps/litellm/woow_litellm_mcp_server/server.py, kind: file_sha256, parse: digest, compare: artifacts.server_py}
+          - id: seed-wrapper
+            label: seed 映像（tag＝woow-mcp-server commit，非上游身分）
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_image
+            record: cloud_app_mcp_litellm
+            compare: info
+    exceptions: []
+    notes:
+      - "包裝差異（不比較）：HA 另改 lifespan.py（scoped DNS-pinned HTTPX）；fastmcp HA 3.4.5、PaaS 3.4.8。"
+
+  mcp-hermes:
+    display_name: Hermes MCP（hermes_mcp_server）
+    upstream: {source: "gitea:WOOWTECH/woow-mcp-server"}   # apps/hermes 在 PaaS repo 內開發；HA 取某個 commit 的快照
+    policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
+    target:
+      version: "2026.10.18"         # 無語意化版號：用最後修改 server.py 的 woow-mcp-server commit 日期（77e3a75）
+      since: "2026-10-18"
+      artifacts: {server_py: "sha256:9fe2b8ef398161ad3ac73e24beab24c5dd259ce085c9593cf65459c283203bf1"}   # apps/hermes/hermes_mcp_server/server.py @main 5526e865
+      verified: "2026-10-24 本機 sha256sum（Gitea 與 GitHub 鏡像 main 同為 5526e865）"
+    known_versions:
+      - {version: "2026.8.11", artifacts: {server_py: "sha256:e1c3f7be4de0302fafb85848641d89a43e83565afa844da9f813f10a718c25a6"}}   # woow-mcp-server 614ae663：HA 現用快照
+    legs:
+      ha:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "github:WOOWTECH/Woow_ha_mcp_addons"
+        ref: claude-delivery
+        pins:
+          - {id: server-py, label: server.py 來源 sha256（runtime-sources.json）, file: docs/provenance/runtime-sources.json, kind: json_select, where: {product: hermes, path: hermes_mcp_server/server.py}, field: upstream_sha256, parse: digest, compare: artifacts.server_py}
+        package_version:
+          - {label: add-on 版號, file: addons/hermes/config.yaml, kind: yaml, path: version}
+        published: {kind: catalog, repo: "github:WOOWTECH/Woow_HA_App_Store", file: .addon-sync/catalog.json, id: woow_mcp_hermes}
+      paas:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "gitea:WOOWTECH/woow-mcp-server"
+        ref: main
+        pins:
+          - {id: server-py, label: server.py 內容 sha256, file: apps/hermes/hermes_mcp_server/server.py, kind: file_sha256, parse: digest, compare: artifacts.server_py}
+          - id: seed-wrapper
+            label: seed 映像（tag＝woow-mcp-server commit，非上游身分）
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_image
+            record: cloud_app_mcp_hermes
+            compare: info
+    exceptions: []
+    notes:
+      - "HA 快照落後 8 個 hermes commit（10-17／18 的安全與功能修補）；HA PR #6／#7／#8／#12 與 woow-mcp-server 分支 feat/mcp-parity-20261023 進行中，合併後 HA 會多 errors.py、guards.py，runtime-sources.json 的 source 格式也會變（woow-mcp-server:<sha>+<branch>）。"
+
+  mcp-emqx:
+    display_name: EMQX MCP（Woow_emqx_mcp_server）
+    upstream: {source: "github:WOOWTECH/Woow_emqx_mcp_server"}
+    policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
+    target:
+      version: "2026.9.12"          # 無語意化版號（套件 __init__.py 是空檔）：用 commit 1be17ba 的日期
+      since: "2026-09-12"
+      identity: {source_commit: "1be17bad5aef6c7b7519686ccbfe1d80762bc10e"}
+      verified: "2026-10-24 來源 repo main 仍是 1be17ba"
+    legs:
+      ha:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "github:WOOWTECH/Woow_ha_mcp_addons"
+        ref: claude-delivery
+        pins:
+          - {id: source-commit, label: vendor 來源 commit（runtime-sources.json）, file: docs/provenance/runtime-sources.json, kind: json_select, where: {product: emqx}, field: source, extract: '([0-9a-f]{40})$', compare: identity.source_commit}
+        package_version:
+          - {label: add-on 版號, file: addons/emqx/config.yaml, kind: yaml, path: version}
+        published: {kind: catalog, repo: "github:WOOWTECH/Woow_HA_App_Store", file: .addon-sync/catalog.json, id: woow_mcp_emqx}
+    exceptions: []
+    notes:
+      - "PaaS 沒有 EMQX MCP（woow-mcp-server 沒有 apps/emqx，seed 沒有 cloud_app_mcp_emqx），只有 HA 一邊。"
+
+  mcp-nextcloud:
+    display_name: Nextcloud MCP（Woow_nextcloud_mcp_server）
+    upstream: {source: "github:WOOWTECH/Woow_nextcloud_mcp_server"}
+    policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
+    target:
+      version: "0.1.5"
+      since: "2026-10-08"
+      identity: {source_commit: "4e09c86f8ee66f147a2d227e7ed1eb9d989394a6"}   # tag v0.1.5＝來源 main
+      verified: "2026-10-24 來源 repo main＝tag v0.1.5＝4e09c86"
+    legs:
+      ha:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "github:WOOWTECH/Woow_ha_mcp_addons"
+        ref: claude-delivery
+        pins:
+          - {id: source-commit, label: vendor 來源 commit（runtime-sources.json）, file: docs/provenance/runtime-sources.json, kind: json_select, where: {product: nextcloud}, field: source, extract: '([0-9a-f]{40})$', compare: identity.source_commit}
+          - {id: package-version, label: 套件 __version__, file: apps/nextcloud/vendor/nextcloud_mcp_server/__init__.py, kind: regex, pattern: '^__version__ = "([^"]+)"', compare: version}
+        package_version:
+          - {label: add-on 版號, file: addons/nextcloud/config.yaml, kind: yaml, path: version}
+        published: {kind: catalog, repo: "github:WOOWTECH/Woow_HA_App_Store", file: .addon-sync/catalog.json, id: woow_mcp_nextcloud}
+      paas:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "gitea:WOOWTECH/woow-mcp-server"
+        ref: main
+        pins:
+          - {id: source-commit, label: vendor 來源 commit（VENDORED.md）, file: apps/nextcloud/VENDORED.md, kind: regex, pattern: '^- commit：`([0-9a-f]{40})`', compare: identity.source_commit}
+          - {id: package-version, label: 套件 __version__, file: apps/nextcloud/nextcloud_mcp_server/__init__.py, kind: regex, pattern: '^__version__ = "([^"]+)"', compare: version}
+          - id: seed-wrapper
+            label: seed 映像（tag＝woow-mcp-server commit，非上游身分）
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_image
+            record: cloud_app_mcp_nextcloud
+            compare: info
+    exceptions: []
+    notes:
+      - "PaaS 落後一個 patch（0.1.4，fe1fbb2d）：apps/nextcloud/scripts/sync_vendor.sh 重新 vendor 即可（VENDORED.md 更新方式）。HA 另改 4 個檔（client／server／errors／webdav，runtime-sources.json 記載），屬包裝差異。"
+
+  # 橫跨五個 Python MCP child 的安全下限：PaaS 2026-10-16 起把 mcp 下限設為 1.30.0（GHSA-84m7-p3x7-pcfv；
+  # woow-mcp-server docs/security/dependency-pins.md:10、pyproject.toml:23），HA 五個 child 仍是 1.28.1。
+  mcp-python-sdk:
+    display_name: MCP Python SDK（mcp）
+    upstream: {package: "pypi:mcp", source: "github:modelcontextprotocol/python-sdk"}
+    policy: {mode: range, min_version: "1.30.0", max_days_behind: 30, downgrade: allowed, hard_rules: []}   # 1.30.0＝GHSA-84m7-p3x7-pcfv 修補版
+    target:
+      version: "1.30.0"
+      since: "2026-10-16"           # PaaS 採用日（PyPI 發佈 2026-09-07）
+      verified: "2026-10-23 PyPI：1.x 最新 1.30.0；另有 2.x 線（最新 2.3.0），本清冊不追"
+    legs:
+      ha:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "github:WOOWTECH/Woow_ha_mcp_addons"
+        ref: claude-delivery
+        pins:
+          - {id: odoo-child, file: apps/odoo/pyproject.toml, kind: pep508, package: mcp, compare: version}
+          - {id: litellm-child, file: apps/litellm/pyproject.toml, kind: pep508, package: mcp, compare: version}
+          - {id: hermes-child, file: apps/hermes/pyproject.toml, kind: pep508, package: mcp, compare: version}
+          - {id: emqx-child, file: apps/emqx/pyproject.toml, kind: pep508, package: mcp, compare: version}
+          - {id: nextcloud-child, file: apps/nextcloud/pyproject.toml, kind: pep508, package: mcp, compare: version}
+      paas:
+        fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
+        repo: "gitea:WOOWTECH/woow-mcp-server"
+        ref: main
+        pins:
+          - {id: uv-lock, label: 根 uv.lock 鎖定（九個 app 共用）, file: uv.lock, kind: uv_lock, package: mcp, compare: version}
+    exceptions: []
+    notes:
+      - "n8n child 另有 npm @modelcontextprotocol/sdk：HA overrides 1.31.0、PaaS 隨 n8n-mcp 的 1.30.0（GHSA-6qxp-vccf-f47h，HA 判斷 OAuth client 部分該 child 不用），未納入。"
+
+# 線上實際部署的手動快照（非真相來源，只供 drift 報告參考；第 1 期起改由 operator 回報）。
+# 本 repo 有公開鏡像：只寫數量與版本，不寫租戶的服務 ID／工作區名稱。
+observations:
+  - product: n8n
+    as_of: "2026-10-16"
+    source: "kubectl get deploy（pi-agent，唯讀）"
+    summary: "4 個 PaaS 服務：2 個跑 2.35.3（amd64 a3693cff，低於下限 2.38.0，同一工作區）；2 個跑 2.38.0（e0e7b603）"
+  - product: emqx
+    as_of: "2026-10-16"
+    source: "kubectl get deploy（pi-agent，唯讀）"
+    summary: "2 個 PaaS 服務跑 5.8.9（amd64 8b92a101）＝ seed"
+  - product: litellm
+    as_of: "2026-10-16"
+    source: "kubectl get deploy（pi-agent，唯讀）"
+    summary: "2 個 PaaS 服務：1 個跑 seed 映像 20261015.0956；1 個仍是 20261014.0718（舊包裝，待 Redeploy）；包裝映像的 base digest 需 JCR 憑證才能讀回，本次未驗"

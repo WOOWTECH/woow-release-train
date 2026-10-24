@@ -1,7 +1,7 @@
 import datetime as dt
 import unittest
 
-from helpers import manifest, wvt
+from helpers import LIVE_MANIFEST_PATH, manifest, wvt
 
 TODAY = dt.date(2026, 10, 16)
 
@@ -10,7 +10,23 @@ def validate(m, today=TODAY):
     return wvt.validate_manifest(m, today)
 
 
+class LiveManifestTest(unittest.TestCase):
+    """The live woow-versions.yaml changes through bot and owner PRs: only its validity is tested."""
+
+    def test_live_manifest_is_valid(self):
+        errors, _ = wvt.validate_manifest(wvt.load_manifest(LIVE_MANIFEST_PATH), dt.date.today(), expiry=False)
+        self.assertEqual(errors, [])
+
+    def test_live_manifest_keeps_the_owner_decisions(self):
+        m = wvt.load_manifest(LIVE_MANIFEST_PATH)
+        self.assertEqual(set(m["products"]) >= {"emqx", "litellm", "n8n"}, True)
+        self.assertEqual(m["products"]["emqx"]["policy"]["license_ceiling"], "<5.9.0")
+        self.assertIn(m["enforcement"], wvt.ENFORCEMENT)
+
+
 class RealManifestTest(unittest.TestCase):
+    """The frozen snapshot (tests/fixtures/woow-versions.yaml) the behaviour tests run on."""
+
     def test_real_manifest_is_valid(self):
         errors, warnings = validate(manifest())
         self.assertEqual(errors, [])
