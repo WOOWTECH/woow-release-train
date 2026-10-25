@@ -842,7 +842,7 @@ products:
     target:
       version: "2.3.0"
       since: "2026-10-24"
-      verified: "2026-10-24 wvt propose：registry None:2.3.0"
+      verified: "2026-10-25 PyPI：mcp 2.3.0（2026-10-02）；PaaS 根 uv.lock 2.3.0、HA 0.4.0 五個 child 與 OpenDesign 0.2.6 內建 MCP 都是 2.3.0"
     known_versions:
       - version: "1.30.0"
         verified: "2026-10-24 PyPI：1.x 最新仍是 1.30.0；2.x 線最新 2.3.0（大改版，兩邊一起另案評估）"
@@ -867,7 +867,7 @@ products:
     exceptions: []
     notes:
       - "n8n child 另有 npm @modelcontextprotocol/sdk：兩邊 overrides 都是 1.32.2（見 mcp-n8n），未納入本項。"
-      - "OpenDesign add-on 的內建 MCP（mcp-runtime/requirements）也用這個 SDK，2026-10-24 納入（0.2.3 是 1.28.1，0.2.4 起 1.30.0，2026-10-24 發佈）。"
+      - "OpenDesign add-on 的內建 MCP（mcp-runtime/requirements）也用這個 SDK，2026-10-24 納入（0.2.3 是 1.28.1，0.2.4 起 1.30.0，0.2.6 起 2.3.0、2026-10-25 發佈）。"
 
 # 線上實際部署的手動快照（非真相來源，只供 drift 報告參考；第 1 期起改由 operator 回報）。
 # 本 repo 有公開鏡像：只寫數量與版本，不寫租戶的服務 ID／工作區名稱。
