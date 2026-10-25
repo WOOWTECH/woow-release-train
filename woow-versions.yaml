@@ -635,7 +635,7 @@ products:
             compare: info
     exceptions: []
     notes:
-      - "2026-10-24 兩邊一起升 2.96.2（PaaS woow-mcp-server #77＝4f09ba1 已合併、平台 develop seed #1975 已改釘；HA Woow_ha_mcp_addons 0.3.2＝PR #17，排在 0.3.1 之後）。兩邊都對該版 dist/ 檔做位元組 patch 並在不符時拒絕啟動，升版要兩邊各自重算 digest。PaaS 版本釘點從 Dockerfile ARG 移到 apps/n8n/upstream-dependencies/。"
+      - "2026-10-24 兩邊一起升 2.96.2（PaaS woow-mcp-server #77＝4f09ba1 已合併、平台 develop seed #1975 已改釘；HA Woow_ha_mcp_addons 0.3.4＝PR #17，2026-10-24 發佈；0.3.2 版號未使用）。兩邊都對該版 dist/ 檔做位元組 patch 並在不符時拒絕啟動，升版要兩邊各自重算 digest。PaaS 版本釘點從 Dockerfile ARG 移到 apps/n8n/upstream-dependencies/。"
       - "n8n-mcp 宣告 @modelcontextprotocol/sdk 1.30.0，兩邊都用 overrides 升到 1.32.2。2.96.2 要求 Node ^22.23.4：兩邊 Node 一起升 22.23.4（node:22.23.4 映像，同一個 index digest）。"
 
   mcp-odoo:
@@ -680,7 +680,7 @@ products:
             compare: info
     exceptions: []
     notes:
-      - "2026-10-24 PaaS #82 升 odoo-mcp 1.3.0（需要 mcp 2.x）；HA 維持 1.1.0 到 MCP SDK 2.x 第 2 階段，這段期間 HA 顯示落後。1.1.0 時兩邊上游身分一致。patch 組合不同屬包裝差異：HA 2 支（cross_session_token_store、direct_writes），PaaS 3 支（另有 fix_remove_3step_tools）加 4 個執行期修補（upstream_fixes、result_limits、tool_errors、concurrency）。"
+      - "2026-10-25 兩邊都是 odoo-mcp 1.3.0（需要 mcp 2.x）：PaaS woow-mcp-server #82、HA Woow_ha_mcp_addons 0.4.0（#22）。patch 組合不同屬包裝差異：HA 2 支（cross_session_token_store、direct_writes），PaaS 3 支（另有 fix_remove_3step_tools）加 4 個執行期修補（upstream_fixes、result_limits、tool_errors、concurrency）。"
 
   mcp-litellm:
     display_name: LiteLLM MCP（Woow_litellm_mcp_server）
@@ -767,7 +767,7 @@ products:
     exceptions: []
     notes:
       - "HA 0.3.0 取 29c383f 的快照（含 10-17／18 安全與功能修補，舊 PR #6／#7／#8 已涵蓋）；HA 0.3.4 的來源紀錄對齊 c4c1e69（巢狀設定先驗證、寫入後讀回）。"
-      - "2026-10-24 PaaS #82 改用 SDK 2 的 MCPServer、工具例外文字維持 1.x（471efdf）→ HA 要到 MCP SDK 2.x 第 2 階段才會跟上，這段期間 HA 顯示落後。"
+      - "2026-10-25 兩邊都是 471efdf 的 server.py（SDK 2 的 MCPServer、工具例外文字維持 1.x）：PaaS #82、HA 0.4.0（#22）。"
       - "包裝差異（不比較）：HA 允許區網 MCP 伺服器、擋 metadata／link-local／迴路位址（AI-HMCP-002-2）；PaaS 用 strict SSRF（另擋私有網段）。"
 
   mcp-emqx:
@@ -831,7 +831,7 @@ products:
             compare: info
     exceptions: []
     notes:
-      - "PaaS 落後一個 patch（0.1.4，fe1fbb2d）：apps/nextcloud/scripts/sync_vendor.sh 重新 vendor 即可（VENDORED.md 更新方式）。HA 另改 4 個檔（client／server／errors／webdav，runtime-sources.json 記載），屬包裝差異。"
+      - "2026-10-24 PaaS woow-mcp-server #74 重新 vendor 到 0.1.5（apps/nextcloud/scripts/sync_vendor.sh，VENDORED.md 記載），兩邊一致。HA 另改 4 個檔（client／server／errors／webdav，runtime-sources.json 記載），屬包裝差異。"
 
   # 橫跨五個 Python MCP child 的安全下限：PaaS 2026-10-16 起把 mcp 下限設為 1.30.0（GHSA-84m7-p3x7-pcfv；
   # woow-mcp-server docs/security/dependency-pins.md:10、pyproject.toml:23），HA 五個 child 仍是 1.28.1。
@@ -842,7 +842,7 @@ products:
     target:
       version: "2.3.0"
       since: "2026-10-24"
-      verified: "2026-10-24 wvt propose：registry None:2.3.0"
+      verified: "2026-10-25 PyPI：mcp 2.3.0（2026-10-02）；PaaS 根 uv.lock 2.3.0、HA 0.4.0 五個 child 與 OpenDesign 0.2.6 內建 MCP 都是 2.3.0"
     known_versions:
       - version: "1.30.0"
         verified: "2026-10-24 PyPI：1.x 最新仍是 1.30.0；2.x 線最新 2.3.0（大改版，兩邊一起另案評估）"
@@ -867,7 +867,7 @@ products:
     exceptions: []
     notes:
       - "n8n child 另有 npm @modelcontextprotocol/sdk：兩邊 overrides 都是 1.32.2（見 mcp-n8n），未納入本項。"
-      - "OpenDesign add-on 的內建 MCP（mcp-runtime/requirements）也用這個 SDK，2026-10-24 納入（0.2.3 是 1.28.1，0.2.4 起 1.30.0，2026-10-24 發佈）。"
+      - "OpenDesign add-on 的內建 MCP（mcp-runtime/requirements）也用這個 SDK，2026-10-24 納入（0.2.3 是 1.28.1，0.2.4 起 1.30.0，0.2.6 起 2.3.0、2026-10-25 發佈）。"
 
 # 線上實際部署的手動快照（非真相來源，只供 drift 報告參考；第 1 期起改由 operator 回報）。
 # 本 repo 有公開鏡像：只寫數量與版本，不寫租戶的服務 ID／工作區名稱。
