@@ -33,7 +33,7 @@ sources:
   # kind cd_image：讀 CD values 的 image（repository＋tag），再到 builds 的建置核可單
   # （作者 gitea-actions、標題「[prod-approval:<workflow>] Build <repository>:<tag>」）取 approval-context 的
   # ADDON_REF——核可後的建置就是用這組值 clone 平台、並驗 image 內的 addon 版號＝clone 版號。
-  # 找不到、互相矛盾、不是 v18.x tag → 平台版「未知」：$<名稱> 的列不比對、drift=true。
+  # 找不到、互相矛盾、不是 v18.x tag → 平台版「未知」：$<名稱> 的列不比對、drift=true（on_unknown: info 的來源只列參考、不算漂移）。
   # values 檔頭的發版註記是人手寫的（10-26 還停在 .258），只拿來交叉比對，不當版號來源。
   prod_platform:
     label: 正式站
@@ -48,7 +48,11 @@ sources:
     file: paas-odoo-platform-stg/values-stg.yaml
     ref: main
     kind: cd_image
-    builds: {repo: "gitea:woow-paas/paas-odoo-ci", workflow: build-image.yml}   # staging 專用的 addon-only 建置沒有核可單 → 未知
+    builds: {repo: "gitea:woow-paas/paas-odoo-ci", workflow: build-image.yml}
+    # staging 平時跑 build-paas-official-staging.yml 的 addon-only 建置（paas-odoo-official-stg，10-23～26 的 7 次
+    # staging 發版都是），這種建置沒有核可單 → 平台版未知。只列 ℹ️、不算漂移，免得 #4 整個 QA 期間都開著；
+    # 讀不到 CD 或核可單仍是 ⚠️、算漂移。正式站不設（預設 drift）：正式站判讀不出來一定要讓 #4 重開。
+    on_unknown: info
 
 # 只測連線、不影響漂移判定：第 2 期機器人要從 Gitea runner 打 GitHub API 開 PR。
 probes:

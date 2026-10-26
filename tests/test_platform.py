@@ -169,16 +169,49 @@ class PlatformDriftTest(unittest.TestCase):
         self.assertEqual(prod["status"], "unreachable")
         self.assertIn("讀不到建置紀錄 gitea:woow-paas/paas-odoo-ci（gitea: HTTP 403）", prod["findings"][0]["message"])
 
-    def test_staging_only_build_is_unknown(self):
-        stg = fixture("cd", "paas-odoo-platform-stg", "values-stg.yaml").replace(
+    def staging_qa_build(self):
+        return fixture("cd", "paas-odoo-platform-stg", "values-stg.yaml").replace(
             "woow-paas-docker-local/paas-odoo-official", "woow-paas-docker-local/paas-odoo-official-stg")
-        rep = self.collect(overrides={(CD, STG_VALUES, "main"): stg})
+
+    def mcp_only(self):
+        """Only the products whose rows are all aligned in the fixtures: drift then comes from staging or not at all."""
+        self.m["products"] = {"woow-mcp-server": self.m["products"]["woow-mcp-server"]}
+
+    def test_staging_qa_build_is_info_not_drift(self):
+        # staging normally runs addon-only builds (build-paas-official-staging.yml → paas-odoo-official-stg, no
+        # build record): all 7 staging releases 10-23..26 were such builds (fix-woow-release-train/raw/01).
+        # Counted as drift, they would have kept the tracking issue open for the whole QA period.
+        rep = self.collect(overrides={(CD, STG_VALUES, "main"): self.staging_qa_build()})
         self.assertIsNone(rep["context"]["stg_platform"])
         self.assertEqual(rep["context"]["prod_platform"], "v18.0.1.0.242")
-        self.assertIn("- staging 平台版：**未知**（建置紀錄（build-image.yml 核可單）沒有 woow-paas-docker-local/paas-odoo-official-stg:20261016.0331）",
-                      wvt.render_markdown(self.m, rep))
-        st = {r["status"] for r in rows(rep, "woow-mcp-server", source="stg")}
-        self.assertEqual(st, {"unknown"})
+        md = wvt.render_markdown(self.m, rep)
+        self.assertIn("- staging 平台版：**未知**（建置紀錄（build-image.yml 核可單）沒有 woow-paas-docker-local/paas-odoo-official-stg:20261016.0331）"
+                      "；用 `$stg_platform` 的列不比對，只列參考、不算漂移（`sources.stg_platform.on_unknown: info`）", md)
+        stg = rows(rep, "woow-mcp-server", source="stg")
+        self.assertEqual(({r["status"] for r in stg}, len(stg)), ({"info"}, 8))
+        self.assertIn("staging 平台版未知（建置紀錄（build-image.yml 核可單）沒有", stg[0]["findings"][0]["message"])
+        self.assertIn("只列參考、不算漂移", stg[0]["findings"][0]["message"])
+        self.assertFalse(any(r["status"] in wvt.DRIFT_STATUSES for r in rep["rows"] if r.get("source") == "stg"))
+        # the compared rows (production, develop) still decide the overview
+        self.assertIn("| woow-mcp-server | lockstep | 2026.10.25.0927 | —（沒有這一邊） | ✅ 一致 2026.10.25.0927 | ✅ 一致 |", md)
+        self.mcp_only()
+        self.assertFalse(self.collect(overrides={(CD, STG_VALUES, "main"): self.staging_qa_build()})["drift"])
+
+    def test_production_unknown_still_counts(self):
+        self.mcp_only()
+        rep = self.collect(issues=[])  # no build record for either pin
+        self.assertEqual(({r["status"] for r in rows(rep, "woow-mcp-server", source="prod")},
+                          {r["status"] for r in rows(rep, "woow-mcp-server", source="stg")}), ({"unknown"}, {"info"}))
+        self.assertTrue(rep["drift"])
+
+    def test_unreadable_staging_still_counts(self):
+        class NoSearch(FakeFetcher):
+            def search_issues(self, repo, query):
+                raise wvt.WvtError("gitea: 讀不到 woow-paas/paas-odoo-ci 的 issue（HTTP 404）")
+        self.mcp_only()
+        rep = wvt.collect_drift(self.m, NoSearch(), TODAY)
+        self.assertEqual({r["status"] for r in rows(rep, "woow-mcp-server", source="stg")}, {"unreachable"})
+        self.assertTrue(rep["drift"])
 
 
 class McpImageLegTest(unittest.TestCase):
@@ -469,6 +502,13 @@ class SourcesManifestTest(unittest.TestCase):
         errs = self.errors(m)
         self.assertTrue(any("sources.prod_platform.kind must be one of cd_image" in e for e in errs), errs)
         self.assertTrue(any("sources.stg_platform.builds needs" in e for e in errs), errs)
+
+    def test_on_unknown(self):
+        m = manifest()
+        self.assertEqual((m["sources"]["prod_platform"].get("on_unknown", "drift"), m["sources"]["stg_platform"]["on_unknown"]),
+                         ("drift", "info"))  # production stays fail-closed
+        m["sources"]["stg_platform"]["on_unknown"] = "ignore"
+        self.assertTrue(any("sources.stg_platform.on_unknown must be one of drift, info" in e for e in self.errors(m)))
 
     def test_identity_pin_keys(self):
         m = manifest()

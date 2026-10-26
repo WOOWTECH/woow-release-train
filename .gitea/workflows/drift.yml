@@ -11,6 +11,9 @@ name: Version drift
 #   - 追蹤 issue 才是負責人看的地方：重新打開會通知訂閱者，歷史留在同一張（#4），不會每次另開新的。
 #   - job 失敗只留給工具本身出錯：清冊驗證失敗（wvt drift 回 2）、Gitea API 寫不進 issue。
 #   - 本次結果另外寫進執行摘要（drift=true／false、issue 動作），綠燈不再等於「沒有漂移」的誤會也就沒了。
+#   - staging 平台版判讀不出來（staging 跑 build-paas-official-staging.yml 的 addon-only QA 建置，沒有核可單；
+#     10-23～26 的 7 次 staging 發版都是）不算漂移，不會因此重開 #4：清冊 sources.stg_platform.on_unknown: info，
+#     那些列只列 ℹ️。讀不到 CD／核可單仍算漂移；正式站平台版判讀不出來一定算漂移、重開 #4。
 #
 # 讀取跨 repo（paas-app-bundle-cd、paas-odoo-ci 是私人 repo）用 org secret CI_GITEA_TOKEN；
 # 寫本 repo 的 issue 用每次執行的 GITEA_TOKEN（permissions: issues: write）。

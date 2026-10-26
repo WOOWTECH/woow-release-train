@@ -63,6 +63,10 @@ TRACKING_MARKER = "<!-- wvt:drift-tracking -->"
 # sources.<name>.kind: cd_image = the platform release is what the CD values pin (image tag), looked up
 # in the CI build record (sources.<name>.builds); release-note comments are only a cross-check
 SOURCE_KINDS = ("cd_image",)
+# sources.<name>.on_unknown: what the rows of `$<name>` are when the platform release cannot be told while
+# everything was readable — drift (default: ❔, counted; production) or info (ℹ️, not counted: staging runs
+# addon-only QA builds that have no build record). Unreadable sources are ⚠️ and counted either way.
+SOURCE_ON_UNKNOWN = ("drift", "info")
 PLATFORM_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+\.\d+\.\d+$")
 BUILD_RECORD_AUTHOR = "gitea-actions"  # the approval issues are opened by the build workflow itself
 TAIPEI = _dt.timezone(_dt.timedelta(hours=8))  # day boundaries for expiry / days-behind
@@ -960,6 +964,8 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
                 and b.get("workflow")):
             E("sources.%s.builds needs {repo: gitea:OWNER/REPO, workflow: <file>}: the build record that names the "
               "platform release of the pinned image" % name)
+        if s.get("on_unknown", "drift") not in SOURCE_ON_UNKNOWN:
+            E("sources.%s.on_unknown must be one of %s" % (name, ", ".join(SOURCE_ON_UNKNOWN)))
     for name, url in (m.get("probes") or {}).items():
         if not str(url).startswith("https://"):
             E("probes.%s must be an https URL" % name)
@@ -1951,7 +1957,8 @@ def resolve_platform(f: Fetcher, name: str, src: dict) -> dict:
     b = src.get("builds") or {}
     info = {"name": name, "label": source_label(name, src), "tag": None, "repo": src["repo"], "file": src["file"],
             "registry": None, "image_repository": None, "image_tag": None, "image_digest": None,
-            "build_repo": b.get("repo"), "build_issues": [], "comment_tag": None, "unreachable": False, "reason": None}
+            "build_repo": b.get("repo"), "build_issues": [], "comment_tag": None, "unreachable": False, "reason": None,
+            "on_unknown": src.get("on_unknown", "drift")}
     try:
         text = f.read(src["repo"], src["file"], src.get("ref", "main"))
     except WvtError as exc:
@@ -1980,9 +1987,20 @@ def _issue_refs(info: dict) -> str:
     return "、".join("%s#%s" % (repo, n) for n in info.get("build_issues") or [])
 
 
+def unknown_is_info(info: dict) -> bool:
+    """The platform release is unknown although everything was readable, and the source says that is only
+    for reference (sources.<name>.on_unknown: info — staging on an addon-only QA build)."""
+    return not info.get("tag") and not info.get("unreachable") and info.get("on_unknown") == "info"
+
+
+def _info_only(info: dict) -> str:
+    return "只列參考、不算漂移（`sources.%s.on_unknown: info`）" % info.get("name")
+
+
 def platform_notes(info: dict) -> list:
     if not info.get("tag"):
-        return ["%s**未知**：%s。用 `$%s` 的列不比對，也不沿用註記或舊值" % (platform_word(info["label"]), info.get("reason"), info["name"])]
+        return ["%s**未知**：%s。用 `$%s` 的列不比對，也不沿用註記或舊值%s" % (
+            platform_word(info["label"]), info.get("reason"), info["name"], "；" + _info_only(info) if unknown_is_info(info) else "")]
     out = []
     if info.get("comment_tag") and info["comment_tag"] != info["tag"]:
         out.append("%s：`%s` 檔頭最新的發版註記寫 %s，但釘的 image %s 依建置紀錄 %s 是 %s（註記沒更新；以建置紀錄為準）"
@@ -2025,9 +2043,10 @@ def collect_drift(m: dict, f: Fetcher, today: _dt.date | None = None) -> dict:
                            "ref": rref, "point": point, "compare": pin.get("compare", "version"), "source": _ref_source(ref)}
                     if rref is None:
                         info = ctx.get(str(ref)[1:] + "_info") or {}
-                        st = "unreachable" if info.get("unreachable") else "unknown"
+                        st = "unreachable" if info.get("unreachable") else "info" if unknown_is_info(info) else "unknown"
+                        msg = "%s未知（%s），不比對" % (platform_word(info.get("label") or ref), info.get("reason") or "無法解析 %s" % ref)
                         row.update(status=st, version=None, observed=None, findings=[finding(
-                            st, "fetch", "%s未知（%s），不比對" % (platform_word(info.get("label") or ref), info.get("reason") or "無法解析 %s" % ref))])
+                            st, "fetch", msg + ("；" + _info_only(info) if st == "info" else ""))])
                         rows.append(row)
                         continue
                     rows.append(_observe_remote(m, p, leg, pin, rref, f, today, row))
@@ -2201,7 +2220,14 @@ def render_platform_line(info: dict) -> str:
         return "- %s：`%s`（`%s` 釘 image `%s:%s@%s`；建置紀錄 %s 的 ADDON_REF）" % (
             platform_word(info["label"]), info["tag"], where, str(info.get("image_repository") or "").split("/")[-1], info.get("image_tag"),
             short(info.get("image_digest")), _issue_refs(info))
-    return "- %s：**未知**（%s）；用 `$%s` 的列不比對" % (platform_word(info.get("label") or "?"), _md(info.get("reason") or "?"), info.get("name"))
+    return "- %s：**未知**（%s）；用 `$%s` 的列不比對%s" % (platform_word(info.get("label") or "?"), _md(info.get("reason") or "?"), info.get("name"),
+                                                    "，" + _info_only(info) if unknown_is_info(info) else "")
+
+
+def _compared(statuses: list) -> list:
+    """The statuses the overview rolls up: a compared row that turned info (a platform release that is only
+    for reference, sources.<name>.on_unknown: info) does not hide the rows that were compared."""
+    return [s for s in statuses if s != "info"] or statuses
 
 
 def render_markdown(m: dict, rep: dict) -> str:
@@ -2236,11 +2262,11 @@ def render_markdown(m: dict, rep: dict) -> str:
                 cells.append("—（沒有這一邊）")
                 continue
             rs = [r for r in rep["rows"] if r["product"] == pname and r["leg"] == leg and r["compare"] != "info"]
-            st = worst([r["status"] for r in rs]) if rs else "unknown"
+            st = worst(_compared([r["status"] for r in rs])) if rs else "unknown"
             vers = sorted({r["version"] for r in rs if r.get("version") and parse_version(r["version"])
                            and r["pin"] not in ("shared_files", "shared_source")}, key=parse_version)
             cells.append("%s %s" % (STATUS_LABELS[st], " / ".join(vers) or ""))
-        allst = worst([r["status"] for r in rep["rows"] if r["product"] == pname and r["compare"] != "info"] or ["unknown"])
+        allst = worst(_compared([r["status"] for r in rep["rows"] if r["product"] == pname and r["compare"] != "info"]) or ["unknown"])
         exc = [e for e in rep["exceptions"] if e["product"] == pname]
         concl = STATUS_LABELS[allst] + ("（有例外 %d）" % len(exc) if exc else "")
         A("| %s | %s%s | %s | %s | %s | %s |" % (

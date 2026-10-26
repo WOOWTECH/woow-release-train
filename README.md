@@ -49,7 +49,7 @@ sources:                      # 正式站／staging 實際部署的平台版：C
     file: paas-odoo-platform/values-prod.yaml
     kind: cd_image
     builds: {repo: "gitea:woow-paas/paas-odoo-ci", workflow: build-image.yml}
-  stg_platform: { label: staging, file: paas-odoo-platform-stg/values-stg.yaml, ... }
+  stg_platform: { label: staging, file: paas-odoo-platform-stg/values-stg.yaml, ..., on_unknown: info }   # 判讀不出來只列參考
 products:
   <產品>:
     upstream: { image: docker.io/..., source: "github:org/repo" }
@@ -136,7 +136,7 @@ python3 -m unittest discover -s tests -v
 
 - **HA**：GitHub 公開 raw；讀不到時改用 api.github.com。另外讀 Store `catalog.json`，並在 catalog 記錄的 `source_sha` 上重讀釘點，這就是「已發佈」的版本。
 - **PaaS**：Gitea API。seed 比正式站實際部署的平台 tag 與 develop（PaaS MCP 映像另比 staging）；charts 和 paas-odoo-ci 比 main。
-- **平台版從哪來**：`sources.<名稱>`（kind `cd_image`）讀 CD values 的 `image.repository`＋`image.tag`，再到 `builds` 的 paas-odoo-ci 建置核可單（作者 `gitea-actions`、標題 `[prod-approval:build-image.yml] Build <repository>:<tag>`）取 `approval-context` 的 `ADDON_REF`。核可後的建置就是用這組值 clone 平台、再驗 image 內 addon 版號＝clone 版號，所以它就是那顆 image 的平台版。找不到、互相矛盾、不是 `v18.x` tag → 報告寫「**未知**」，`$<名稱>` 的列標 ❔（讀不到檔或核可單是 ⚠️）、drift＝true，不退回檔頭的發版註記；註記只用來交叉比對，和建置紀錄不同時寫在備註。
+- **平台版從哪來**：`sources.<名稱>`（kind `cd_image`）讀 CD values 的 `image.repository`＋`image.tag`，再到 `builds` 的 paas-odoo-ci 建置核可單（作者 `gitea-actions`、標題 `[prod-approval:build-image.yml] Build <repository>:<tag>`）取 `approval-context` 的 `ADDON_REF`。核可後的建置就是用這組值 clone 平台、再驗 image 內 addon 版號＝clone 版號，所以它就是那顆 image 的平台版。找不到、互相矛盾、不是 `v18.x` tag → 報告寫「**未知**」，`$<名稱>` 的列標 ❔（讀不到檔或核可單是 ⚠️）、drift＝true，不退回檔頭的發版註記；註記只用來交叉比對，和建置紀錄不同時寫在備註。來源設了 `on_unknown: info`（staging）時，「讀得到、但判讀不出來」只列 ℹ️、不算漂移：staging 平時跑沒有核可單的 addon-only 建置（下面「已知限制」），算進漂移的話追蹤 issue 整個 QA 期間都會開著；讀不到（⚠️）照樣算。正式站維持預設（`drift`）。
 - **Gitea 的 ref 先解析成完整 commit sha**：Gitea 的 raw API 只認分支、tag 和完整 sha；不存在的 tag／分支、以及確實存在的短 sha，都會回預設分支的內容（HTTP 200）。所以讀檔前先用 commits API 把 ref 解析成完整 sha（分支、tag、短 sha 都行；不存在就當「檔案不存在」），再用這個完整 sha 讀 raw。同一次執行裡每個 repo＋ref 只查一次，同一個分支的各檔案也都讀同一個 commit。
 - **404 分清「不存在」和「讀不到」**：Gitea 對權杖看不到的私人 repo 一律回 404（repo 本身、commits、raw、issue 都是，10-26 實測）。repo 內的 404 要先確認 repo 本身看得到才算「不存在」（❔）；repo 看不到、或建置核可單的 issue 搜尋回 404，一律算「讀不到」（⚠️），報告不會寫成「沒有核可單」或「檔案不存在」——`CI_GITEA_TOKEN` 失去 paas-odoo-ci 或 CD 的讀取權限時，一眼就看得出來。
 - **PaaS MCP 映像**（產品 `woow-mcp-server`）：8 個 MCP 範本（`cloud_app_mcp_*`）的 image tag 比清冊的 woow-mcp-server 目標 commit、digest 比目標那次建置；正式站、staging、develop 三個點都比。
@@ -285,6 +285,6 @@ python3 tools/wvtbot.py --bot propose --product mcp-n8n --version 2.96.2 --allow
 ## 已知限制
 
 - PaaS「已部署」欄目前是手動快照（`observations`，有日期，超過 14 天會警告）。改由平台自動回報列在後續工作，第 1 期仍是手動。
-- 平台版靠建置核可單對 image tag：staging 專用的 addon-only 建置（`build-paas-official-staging.yml`，推到 `paas-odoo-official-stg`）沒有核可單，staging 釘這種 image 時 staging 平台版是「未知」。核可單沒有 digest，所以是用 tag（建置當下時間產生）對應，digest 只顯示不驗。
+- 平台版靠建置核可單對 image tag：staging 專用的 addon-only 建置（`build-paas-official-staging.yml`，推到 `paas-odoo-official-stg`）沒有核可單，staging 釘這種 image 時 staging 平台版是「未知」（10-23～26 的 7 次 staging 發版都是這種建置）：清冊設 `on_unknown: info`，這段期間 staging 的列只列參考、不比對，也不算漂移。核可單沒有 digest，所以是用 tag（建置當下時間產生）對應，digest 只顯示不驗。
 - JCR 需要憑證，本 repo 不讀 JCR。PaaS 的 digest 身分靠 seed 裡的 `tag@sha256`：JCR 鏡像用 `--preserve-digests`，與上游 digest 逐字相同。
 - YAML 子集不支援 anchor、alias、tag、多文件，也不支援「折疊字串裡再縮排」這類罕見寫法。各邊的 Chart.yaml、values.yaml、config.yaml 已驗證可正確解析。
