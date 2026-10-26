@@ -137,9 +137,12 @@ class Phase3ManifestTest(unittest.TestCase):
     def test_products_and_policies(self):
         prods = manifest()["products"]
         self.assertEqual(sorted(prods), sorted(["emqx", "litellm", "n8n", "hermes", "opendesign", "mcp-n8n", "mcp-odoo",
-                                                "mcp-litellm", "mcp-hermes", "mcp-emqx", "mcp-nextcloud", "mcp-python-sdk"]))
-        for name in ("hermes", "opendesign", "mcp-n8n", "mcp-odoo", "mcp-litellm", "mcp-hermes", "mcp-emqx", "mcp-nextcloud", "mcp-python-sdk"):
+                                                "mcp-litellm", "mcp-hermes", "mcp-emqx", "mcp-nextcloud", "mcp-python-sdk",
+                                                "woow-mcp-server"]))
+        for name in ("hermes", "opendesign", "mcp-n8n", "mcp-odoo", "mcp-litellm", "mcp-hermes", "mcp-emqx", "mcp-nextcloud", "mcp-python-sdk",
+                     "woow-mcp-server"):
             self.assertEqual(prods[name]["policy"]["hard_rules"], [], name)  # phase 3 observes first
+        self.assertIs(prods["woow-mcp-server"]["legs"]["paas"]["fanout"]["enabled"], False)
         self.assertEqual(prods["hermes"]["policy"]["mode"], "range")
         self.assertEqual(prods["hermes"]["upstream"]["image_tag"], "v{version}")
         self.assertEqual(prods["mcp-python-sdk"]["policy"]["min_version"], "1.30.0")

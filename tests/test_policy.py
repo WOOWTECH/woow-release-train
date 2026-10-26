@@ -34,6 +34,27 @@ class VersionHelpersTest(unittest.TestCase):
         self.assertEqual(wvt.cmp_versions("5.10.5", "5.9.0"), 1)
         self.assertIsNone(wvt.cmp_versions("latest", "1.0"))
 
+    def test_pin_compare_ignores_suffixes(self):
+        # a pin tag such as 1.104.0-stable names the same upstream release
+        self.assertEqual(wvt.cmp_versions("1.104.0-stable", "1.104.0"), 0)
+        self.assertEqual(wvt.cmp_versions("2.96.2-beta.1", "2.96.2"), 0)
+
+    def test_release_precedence_is_semver_11(self):
+        chain = ["1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11",
+                 "1.0.0-rc.1", "1.0.0", "1.0.1-rc.1", "v1.0.1", "1.2", "2026.10.24.1"]
+        for lo, hi in zip(chain, chain[1:]):
+            self.assertEqual(wvt.cmp_release(lo, hi), -1, (lo, hi))
+            self.assertEqual(wvt.cmp_release(hi, lo), 1, (hi, lo))
+        self.assertEqual(sorted(reversed(chain), key=wvt.release_key), chain)
+        self.assertEqual(wvt.cmp_release("2.96.2+build.7", "2.96.2"), 0)   # build metadata is not precedence
+        self.assertEqual(wvt.cmp_release("1.2", "1.2.0"), 0)
+        self.assertEqual(wvt.cmp_release("1.0.0-rc.1+b", "1.0.0-rc.1"), 0)
+
+    def test_pep440_and_junk_cannot_be_ordered(self):
+        for v in ("2.0.0rc1", "2.2.0.post1", "1.0.dev3", "2.0.0a1", "latest", "1.2.3-", "1.2.3_x", "", None):
+            self.assertIsNone(wvt.release_key(v), v)
+            self.assertIsNone(wvt.cmp_release(v, "2.3.0"), v)
+
     def test_satisfies(self):
         self.assertTrue(wvt.satisfies("5.8.9", "<5.9.0"))
         self.assertFalse(wvt.satisfies("5.9.0", "<5.9.0"))

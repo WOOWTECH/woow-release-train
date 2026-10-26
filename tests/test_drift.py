@@ -1,7 +1,9 @@
 import datetime as dt
+import socket
 import unittest
+import urllib.request
 
-from helpers import FakeFetcher, LITELLM_MAIN_BLOBS, fixture, manifest, wvt
+from helpers import FakeFetcher, LITELLM_MAIN_BLOBS, NetworkBlocked, fixture, manifest, wvt
 
 TODAY = dt.date(2026, 10, 16)
 ORIGINAL = ("emqx", "litellm", "n8n")
@@ -114,6 +116,33 @@ class DriftTest(unittest.TestCase):
         self.assertTrue(any(e["days_left"] < 0 for e in rep["exceptions"]))
         md = wvt.render_markdown(self.m, rep)
         self.assertIn("**已過期**", md)
+
+
+class HermeticTest(unittest.TestCase):
+    """The tests never reach the network (tests/helpers.py). 10-26 review: every collect_drift opened a real
+    connection for the manifest's api.github.com probe (44 per run) — green offline, but up to the 20 s
+    Fetcher timeout each where a runner's egress is dropped instead of refused."""
+
+    def test_a_real_request_errors_the_test(self):
+        with self.assertRaises(NetworkBlocked):
+            urllib.request.urlopen("https://api.github.com/rate_limit", timeout=1)
+        with self.assertRaises(NetworkBlocked):  # not swallowed into a WvtError by Fetcher._get
+            wvt.Fetcher()._get("https://api.github.com/rate_limit")
+
+    def test_loopback_still_works(self):
+        srv = socket.socket()
+        self.addCleanup(srv.close)
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(1)
+        socket.create_connection(srv.getsockname(), timeout=1).close()
+
+    def test_the_connectivity_probe_is_served_by_the_fake(self):
+        f = FakeFetcher()
+        rep = wvt.collect_drift(manifest(), f, TODAY)
+        self.assertIn(("get", "https://api.github.com/rate_limit"), f.calls)
+        self.assertEqual(rep["probes"]["api.github.com"], {"ok": 1, "errors": []})
+        down = wvt.collect_drift(manifest(), FakeFetcher(unreachable={"github"}), TODAY)
+        self.assertEqual(down["probes"]["api.github.com"]["errors"], ["URLError: simulated"])
 
 
 if __name__ == "__main__":

@@ -48,6 +48,7 @@ EXTRACTORS = ("dockerfile_arg", "yaml", "json", "seed_image", "seed_field", "cat
               "dockerfile_from", "regex", "pep508", "uv_lock", "json_select", "file_sha256")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
+FULL_COMMIT_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")  # a full git object id (sha1 / sha256 repos)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 REPO_RE = re.compile(r"^(github|gitea):[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 HARD_RULES = ("license_ceiling", "min_version", "digest", "shared_files", "exception_expired")
@@ -59,6 +60,15 @@ BOT_MODES = ("off", "dry-run", "open-pr")
 PACKAGE_BUMPS = ("none", "same", "patch")
 EXPIRY_WARN_DAYS = 14
 TRACKING_MARKER = "<!-- wvt:drift-tracking -->"
+# sources.<name>.kind: cd_image = the platform release is what the CD values pin (image tag), looked up
+# in the CI build record (sources.<name>.builds); release-note comments are only a cross-check
+SOURCE_KINDS = ("cd_image",)
+# sources.<name>.on_unknown: what the rows of `$<name>` are when the platform release cannot be told while
+# everything was readable — drift (default: ❔, counted; production) or info (ℹ️, not counted: staging runs
+# addon-only QA builds that have no build record). Unreadable sources are ⚠️ and counted either way.
+SOURCE_ON_UNKNOWN = ("drift", "info")
+PLATFORM_TAG_RE = re.compile(r"^v\d+\.\d+\.\d+\.\d+\.\d+$")
+BUILD_RECORD_AUTHOR = "gitea-actions"  # the approval issues are opened by the build workflow itself
 TAIPEI = _dt.timezone(_dt.timedelta(hours=8))  # day boundaries for expiry / days-behind
 
 # Status vocabulary. DRIFT_STATUSES make the drift report "dirty".
@@ -517,10 +527,43 @@ def parse_version(v):
 
 
 def cmp_versions(a, b):
+    """-1/0/1 by the numeric core only (None if either is not a version): a `-…`／`+…` suffix is ignored on
+    purpose — for a pin, `1.104.0-stable` is the same upstream release as `1.104.0`. Choosing a NEW
+    target (wvtbot propose) uses cmp_release, which also orders pre-releases."""
     pa, pb = parse_version(a), parse_version(b)
     if pa is None or pb is None:
         return None
     return (pa > pb) - (pa < pb)
+
+
+_RELEASE_RE = re.compile(r"^v?(\d+(?:\.\d+){0,3})(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
+
+
+def release_key(v):
+    """Sort key of a version for choosing a release (SemVer §11), or None when no order can be claimed.
+
+    The numeric core decides first; with an equal core a pre-release (`2.96.2-beta.1`) sorts BELOW its
+    release (`2.96.2`); pre-release fields compare one by one (numbers numerically, and below words),
+    more fields win when the shorter list is a prefix; build metadata (`+…`) is ignored. PEP 440 forms
+    (`2.0.0rc1`, `2.2.0.post1`, `1.0.dev3`) and anything else return None: they cannot be ordered here,
+    and cannot be a manifest target either (validate needs parse_version).
+    """
+    m = _RELEASE_RE.match(str(v).strip()) if v is not None else None
+    if not m:
+        return None
+    core = tuple(int(x) for x in m.group(1).split("."))
+    core += (0,) * (4 - len(core))
+    if m.group(2) is None:
+        return (core, 1, ())
+    return (core, 0, tuple((0, int(x), "") if x.isdigit() else (1, 0, x) for x in m.group(2).split(".")))
+
+
+def cmp_release(a, b):
+    """-1/0/1 by release_key (SemVer §11 precedence); None when either cannot be ordered."""
+    ka, kb = release_key(a), release_key(b)
+    if ka is None or kb is None:
+        return None
+    return (ka > kb) - (ka < kb)
 
 
 def satisfies(version, constraint: str) -> bool:
@@ -658,6 +701,48 @@ def extract_seed_image(text: str, record: str, image_path: str = "image"):
     digest = ref.get("digest") or norm_digest(img.get("digest"))
     return {"repository": repo, "tag": ref.get("tag"), "digest": digest,
             "raw": "%s:%s" % (repo, tag) if repo else tag}
+
+
+def seed_images(text: str) -> dict:
+    """{record id: (image.repository, tag)} of every seed record whose helm_default_values names an image."""
+    out = {}
+    for rec in ET.fromstring(text.encode("utf-8") if isinstance(text, str) else text).iter("record"):
+        raw = next(((f.text or "").strip() for f in rec.findall("field") if f.get("name") == "helm_default_values"), "")
+        try:
+            img = (json.loads(raw) or {}).get("image") if raw else None
+        except (ValueError, AttributeError):
+            img = None
+        if isinstance(img, dict) and img.get("repository"):
+            out[rec.get("id")] = (img["repository"], parse_image_ref(img.get("tag") or "").get("tag") if img.get("tag") else None)
+    return out
+
+
+def coverage_pins(p: dict, leg: str) -> set:
+    """The seed records a leg pins in its coverage file (seed_image pins on that file, in the leg's repo)."""
+    legd = (p.get("legs") or {}).get(leg) or {}
+    cov = legd.get("coverage") or {}
+    return {pin.get("record") for pin in iter_pins(p, leg)
+            if pin.get("kind") == "seed_image" and pin.get("file") == cov.get("file") and pin.get("repo") == legd.get("repo")}
+
+
+def coverage_findings(p: dict, leg: str, text: str) -> list:
+    """Findings of a leg's `coverage` rule over one seed: every record whose image.repository matches
+    coverage.image must be pinned on this leg (a seed_image pin on that file) or excluded with a reason.
+    A new MCP template the manifest does not know is ❔ — it could still be on a pre-all-on image."""
+    cov = ((p.get("legs") or {}).get(leg) or {}).get("coverage") or {}
+    pat = re.compile(cov["image"])
+    pinned = coverage_pins(p, leg)
+    excl = cov.get("exclude") or {}
+    hits = {rid: img for rid, img in seed_images(text).items() if pat.search(img[0])}
+
+    def image(rid):
+        return "%s:%s" % (hits[rid][0].split("/")[-1], _id(hits[rid][1]) if hits[rid][1] else "?")
+    fs = [finding("unknown", "coverage", "seed 有 %s（%s），清冊沒有釘點：加進 pins，或寫進 coverage.exclude 並說明為什麼不追"
+                  % (rid, image(rid))) for rid in sorted(set(hits) - pinned - set(excl))]
+    fs += [finding("info", "coverage", "%s 不追（%s）：%s" % (rid, image(rid), excl[rid])) for rid in sorted(set(hits) & set(excl))]
+    fs.append(finding("ok", "coverage", "%d 個 image 符合 `%s` 的範本：%d 個有釘點、%d 個排除"
+                      % (len(hits), cov["image"], len(set(hits) & pinned), len(set(hits) & set(excl)))))
+    return fs
 
 
 def extract_catalog(text: str, comp_id: str):
@@ -914,6 +999,15 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
             E("sources.%s.repo invalid: %r" % (name, s.get("repo")))
         if not s.get("file"):
             E("sources.%s.file missing" % name)
+        if s.get("kind") not in SOURCE_KINDS:
+            E("sources.%s.kind must be one of %s" % (name, ", ".join(SOURCE_KINDS)))
+        b = s.get("builds")
+        if not (isinstance(b, dict) and str(b.get("repo", "")).startswith("gitea:") and REPO_RE.match(str(b.get("repo")))
+                and b.get("workflow")):
+            E("sources.%s.builds needs {repo: gitea:OWNER/REPO, workflow: <file>}: the build record that names the "
+              "platform release of the pinned image" % name)
+        if s.get("on_unknown", "drift") not in SOURCE_ON_UNKNOWN:
+            E("sources.%s.on_unknown must be one of %s" % (name, ", ".join(SOURCE_ON_UNKNOWN)))
     for name, url in (m.get("probes") or {}).items():
         if not str(url).startswith("https://"):
             E("probes.%s must be an https URL" % name)
@@ -960,9 +1054,10 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
                 E("%s.policy.license_ceiling: %s" % (where, exc))
         if mode == "range":
             mv = pol.get("min_version")
+            c = cmp_versions(mv, tv) if isinstance(mv, str) and isinstance(tv, str) else None
             if not isinstance(mv, str) or parse_version(mv) is None:
                 E("%s.policy.min_version required (quoted) for range mode" % where)
-            elif tv and cmp_versions(mv, tv) > 0:
+            elif c is not None and c > 0:  # an unparseable target is reported above (target.version)
                 E("%s.policy.min_version %s is above target %s" % (where, mv, tv))
             if not isinstance(pol.get("max_days_behind"), int):
                 E("%s.policy.max_days_behind (int) required for range mode" % where)
@@ -976,6 +1071,11 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
                     E("%s.%s.version must be a quoted version" % (where, label))
                 if tv and kv.get("version") == tv:
                     E("%s.%s duplicates the target version" % (where, label))
+                for iname, iv in (kv.get("identity") or {}).items():
+                    if not isinstance(iv, str) or not iv:
+                        E("%s.%s.identity.%s must be a non-empty quoted string" % (where, label, iname))
+                    elif iv == (tgt.get("identity") or {}).get(iname):
+                        E("%s.%s.identity.%s duplicates the target" % (where, label, iname))
             ds = [kv.get("index_digest")] + list((kv.get("platforms") or {}).values()) + list((kv.get("artifacts") or {}).values())
             for d in ds:
                 if d is None:
@@ -1019,9 +1119,36 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
                     E("%s: compare %r invalid" % (pw, cmp_))
                 elif cmp_ not in ("version", "info") and target_value(p, cmp_) is None:
                     E("%s: compare %s but target has no such digest" % (pw, cmp_))
-                ref = pin.get("ref")
-                if isinstance(ref, str) and ref.startswith("$") and ref[1:] not in srcs:
-                    E("%s: ref %s refers to an unknown source" % (pw, ref))
+                for ref in [pin.get("ref")] + list(pin.get("also_refs") or []):
+                    if isinstance(ref, str) and ref.startswith("$") and ref[1:] not in srcs:
+                        E("%s: ref %s refers to an unknown source" % (pw, ref))
+                dk = pin.get("digest")  # an identity pin (e.g. a seed tag = commit) whose digest must be that build
+                if dk is not None and not (str(cmp_).startswith("identity.") and re.match(
+                        r"^(index_digest|(platforms|artifacts)\.[A-Za-z0-9_.-]+)$", str(dk)) and target_value(p, str(dk))):
+                    E("%s: digest must name a target digest (index_digest, platforms.<arch>, artifacts.<name>) "
+                      "and goes with an identity compare" % pw)
+                hist = pin.get("history")  # the repo whose history orders an identity commit (behind / ahead)
+                if hist is not None and not (str(cmp_).startswith("identity.") and str(hist).startswith("gitea:")
+                                             and REPO_RE.match(str(hist))):
+                    E("%s: history must be gitea:OWNER/REPO and goes with an identity compare" % pw)
+            cov = legs[leg].get("coverage")
+            if cov is not None:
+                cw = "%s.legs.%s.coverage" % (where, leg)
+                seeds = coverage_pins(p, leg)
+                try:
+                    re.compile(str(cov.get("image") or ""))
+                    bad_re = not cov.get("image")
+                except re.error:
+                    bad_re = True
+                if not cov.get("file") or bad_re:
+                    E("%s needs file and image (a regex on image.repository)" % cw)
+                elif not seeds:
+                    E("%s: no seed_image pin of this leg reads %s" % (cw, cov.get("file")))
+                for rid, why in (cov.get("exclude") or {}).items():
+                    if not isinstance(why, str) or not why.strip():
+                        E("%s.exclude.%s needs the reason as a string" % (cw, rid))
+                    if rid in seeds:
+                        E("%s.exclude.%s is also pinned" % (cw, rid))
             pkgs = legs[leg].get("package_version") or []
             for pkg in ([pkgs] if isinstance(pkgs, dict) else pkgs):
                 kw = "%s.legs.%s.package_version[%s]" % (where, leg, pkg.get("label"))
@@ -1158,8 +1285,53 @@ def active_exceptions(product: dict, leg: str, today: _dt.date, pin_id: str | No
     return out
 
 
-def evaluate(product: dict, leg: str, pin: dict, obs: dict, today: _dt.date | None = None) -> dict:
-    """Compare one observation with the manifest. Returns {status, version, findings}."""
+def _same_identity(want: str, got: str, pin: dict) -> bool:
+    if not want or not got:
+        return False
+    return want.startswith(got) if pin.get("match") == "prefix" and len(got) >= 7 else got == want
+
+
+def _identity_findings(product: dict, pin: dict, compare: str, want: str, got: str, order=None):
+    """(version, findings) for an identity that is not the target: a known_versions entry with the same
+    identity gives its version (behind / ahead by version); otherwise `order(history, want, got)` (online:
+    drift) places a commit before / after the target; without it the difference is a mismatch."""
+    name = compare.split(".", 1)[1]
+    tv = (product.get("target") or {}).get("version")
+    for kv in product.get("known_versions") or []:
+        known = str((kv.get("identity") or {}).get(name) or "")
+        if _same_identity(known, got, pin):
+            c = cmp_versions(kv.get("version"), tv)
+            st = "behind" if c is not None and c < 0 else "ahead" if c is not None and c > 0 else "mismatch"
+            return kv.get("version"), [finding(st, "identity", "%s：%s（清冊記為 %s）≠ 清冊目標 %s（%s）"
+                                               % (compare, _id(got), kv.get("version"), _id(want), tv))]
+    c = cmp_versions(got, want)
+    st = "behind" if c is not None and c < 0 else "ahead" if c is not None and c > 0 else "mismatch"
+    msg = "%s：%s ≠ 清冊 %s" % (compare, _id(got), _id(want))
+    hist = pin.get("history")
+    if st == "mismatch" and hist and order is not None:
+        where = hist.split(":", 1)[1]
+        try:
+            rel = order(hist, want, got)
+        except WvtError as exc:
+            msg += "（無法向 %s 確認先後：%s）" % (where, exc)
+        else:
+            if rel == "behind":
+                st, msg = "behind", "%s：%s 是清冊目標 %s 之前的 commit（%s）" % (compare, _id(got), _id(want), where)
+            elif rel == "ahead":
+                st, msg = "ahead", "%s：%s 是清冊目標 %s 之後的 commit（%s）：清冊 target 要跟上" % (compare, _id(got), _id(want), where)
+            elif rel == "diverged":
+                msg = "%s：%s 和清冊目標 %s 分岔，不在 %s 的同一條歷史上" % (compare, _id(got), _id(want), where)
+            else:
+                msg = "%s：%s 不是 %s 裡的 commit（清冊目標 %s）" % (compare, _id(got), where, _id(want))
+    return None, [finding(st, "identity", msg)]
+
+
+def evaluate(product: dict, leg: str, pin: dict, obs: dict, today: _dt.date | None = None, order=None) -> dict:
+    """Compare one observation with the manifest. Returns {status, version, findings}.
+
+    order(history repo, target commit, other commit) -> behind | ahead | diverged | None places an identity
+    commit in a repo's history; only ``drift`` (online) passes it, for pins that name a `history`.
+    """
     today = today or _dt.datetime.now(TAIPEI).date()
     pol = product.get("policy") or {}
     mode = pol.get("mode")
@@ -1181,11 +1353,22 @@ def evaluate(product: dict, leg: str, pin: dict, obs: dict, today: _dt.date | No
         if got is None:
             return {"status": "unknown", "version": version,
                     "findings": [finding("unknown", "extract", "釘點沒有值，無法比對 %s" % compare)]}
-        same = want.startswith(got) if pin.get("match") == "prefix" and len(got) >= 7 else got == want
-        if not same:
-            c = cmp_versions(got, want)
-            st = "behind" if c is not None and c < 0 else "ahead" if c is not None and c > 0 else "mismatch"
-            findings.append(finding(st, "identity", "%s：%s ≠ 清冊 %s" % (compare, _id(got), _id(want))))
+        if _same_identity(want, got, pin):
+            if version is None:  # e.g. a seed image whose tag is the target commit
+                version = tv
+            dkey = pin.get("digest")
+            if dkey:  # the tag names the target build; the digest must be that build's too
+                wd, gd = target_value(product, dkey), obs.get("digest")
+                if gd is None:
+                    findings.append(finding("unknown", "digest", "tag 是清冊目標 %s，但釘點沒有 digest，無法確認是那次建置（清冊 %s %s）"
+                                            % (_id(got), dkey, short(wd))))
+                elif gd != wd:
+                    findings.append(finding("mismatch", "digest", "tag 是清冊目標 %s，但 digest %s ≠ 清冊 %s %s"
+                                            % (_id(got), short(gd), dkey, short(wd))))
+        else:
+            kv_version, fs = _identity_findings(product, pin, compare, want, got, order)
+            version = version if kv_version is None else kv_version
+            findings.extend(fs)
     else:
         if compare != "version":
             want = target_value(product, compare)
@@ -1459,6 +1642,14 @@ def check_repo(m: dict, leg: str, repo_dir: str, repo: str | None, today, produc
             rows.append(({"id": "license", "file": judged[0][0]["file"]}, {"status": "violation", "version": None, "findings": [
                 finding("violation", "license_ceiling", "判讀不出上游版本，無法確認授權上限 %s：先把這個 digest 登記進清冊（target 或 known_versions）"
                         % ceiling)]}))
+        cov = ((p.get("legs") or {}).get(leg) or {}).get("coverage")
+        cov_path = os.path.join(repo_dir, cov["file"]) if cov else None
+        if cov and (not repo or p["legs"][leg].get("repo") == repo) and os.path.exists(cov_path):
+            try:
+                fs = coverage_findings(p, leg, _read(cov_path))
+            except (ET.ParseError, ValueError) as exc:
+                fs = [finding("unknown", "coverage", "解析失敗：%s" % exc)]
+            rows.append(({"id": "coverage", "file": cov["file"]}, _rollup(fs)))
         for sf in p.get("shared_files") or []:
             for c in sf.get("consumers") or []:
                 if c["leg"] != leg or (repo and c["repo"] != repo):
@@ -1582,6 +1773,8 @@ class Fetcher:
         self.timeout = timeout
         self.probes = {}  # endpoint -> {"ok": n, "errors": [...]}
         self.cache = {}
+        self.commits = {}  # (gitea repo, ref) -> the full commit sha it names | None (no such ref)
+        self.visible = {}  # gitea repo -> can the token see it (a 404 inside it is then "not there")
 
     def _probe(self, ep, err=None):
         pr = self.probes.setdefault(ep, {"ok": 0, "errors": []})
@@ -1627,8 +1820,51 @@ class Fetcher:
             if self.github_token:
                 hdr["Authorization"] = "Bearer " + self.github_token
             return self._get(api, hdr, endpoint="api.github.com")
-        url = "%s/repos/%s/raw/%s?ref=%s" % (self.gitea_api, full, urllib.parse.quote(path), urllib.parse.quote(ref))
-        return self._get(url, self._gitea_hdr(), endpoint="gitea")
+        sha = self.resolve_commit(repo, ref)
+        if sha is None:
+            return None
+        url = "%s/repos/%s/raw/%s?ref=%s" % (self.gitea_api, full, urllib.parse.quote(path), sha)
+        body = self._get(url, self._gitea_hdr(), endpoint="gitea")
+        return body if body is not None else self._not_found(repo)
+
+    def resolve_commit(self, repo: str, ref: str):
+        """The full commit sha a Gitea branch, tag or (short) sha names; None when there is no such ref.
+
+        Gitea's raw endpoint takes only a branch, a tag or a FULL sha as `ref`: anything else — a missing
+        tag or branch, or a short sha that does exist — is answered with the default branch and HTTP 200
+        (Gitea 1.27, checked 2026-10-26), so a read at a missing platform tag, or at `11b2ed8`, would
+        silently compare develop. The commits list resolves all of them (and 404s on a missing one), so
+        every Gitea read goes to raw with the full sha it resolved to; one lookup per (repo, ref) and run,
+        which also keeps every file read at a branch on the same commit."""
+        if FULL_COMMIT_RE.match(str(ref)):
+            return ref
+        key = (repo, ref)
+        if key not in self.commits:
+            full = repo.split(":", 1)[1]
+            data = self.gitea_json("/repos/%s/commits?sha=%s&limit=1&stat=false&verification=false&files=false"
+                                   % (full, urllib.parse.quote(ref, safe="")))
+            if data is None:
+                self._not_found(repo)  # raises when the token cannot see the repo: unreachable, not "no such ref"
+            else:
+                self.visible[repo] = True
+            sha = data[0].get("sha") if isinstance(data, list) and data and isinstance(data[0], dict) else None
+            self.commits[key] = sha if FULL_COMMIT_RE.match(str(sha or "")) else None
+        return self.commits[key]
+
+    def repo_visible(self, repo: str) -> bool:
+        """Can the token see this Gitea repo? Gitea answers 404 for a private repo the token may not read
+        exactly as for a missing repo (checked 2026-10-26: without access the repo, its issues, commits and
+        raw files all 404), so a 404 inside a repo only means "not there" once the repo itself is visible."""
+        if repo not in self.visible:
+            self.visible[repo] = self.gitea_json("/repos/%s" % repo.split(":", 1)[1]) is not None
+        return self.visible[repo]
+
+    def _not_found(self, repo: str):
+        """A Gitea 404 inside `repo`: None when the repo is visible (the ref／file／commit is not there),
+        WvtError when the token cannot see the repo, so the row reads ⚠️ unreachable — never ❔ 不存在."""
+        if self.repo_visible(repo):
+            return None
+        raise WvtError("gitea: 讀不到 %s（HTTP 404：repo 不存在，或權杖沒有讀取權限）" % repo.split(":", 1)[1])
 
     def _gitea_hdr(self):
         return {"Authorization": "token " + self.gitea_token} if self.gitea_token else {}
@@ -1642,14 +1878,42 @@ class Fetcher:
         if host != "gitea":
             raise WvtError("blob_shas only implemented for gitea")
         data = self.gitea_json("/repos/%s/contents/%s?ref=%s" % (full, urllib.parse.quote(path.rstrip("/")), urllib.parse.quote(ref)))
+        if data is None:
+            return self._not_found(repo)
         if not isinstance(data, list):
             return None
         return {x["name"]: x["sha"] for x in data if x.get("type") == "file"}
 
     def commits_between(self, repo: str, base: str, head: str):
+        """Commits head has and base lacks (Gitea compare base...head); None when either is unknown."""
         host, full = repo.split(":", 1)
         data = self.gitea_json("/repos/%s/compare/%s...%s" % (full, base, head))
-        return None if data is None else data.get("total_commits")
+        return self._not_found(repo) if data is None else data.get("total_commits")
+
+    def commit_order(self, repo: str, target: str, other: str):
+        """Where `other` sits against `target` in repo's history: behind (an ancestor), ahead (a descendant),
+        diverged, or None when the repo does not know one of them."""
+        n = self.commits_between(repo, target, other)
+        if n is None:
+            return None
+        if n == 0:
+            return "behind"
+        back = self.commits_between(repo, other, target)
+        if back is None:
+            return None
+        return "ahead" if back == 0 else "diverged"
+
+    def search_issues(self, repo: str, query: str):
+        """Issues and closed issues of a Gitea repo matching a search string (the build approval records)."""
+        host, full = repo.split(":", 1)
+        if host != "gitea":
+            raise WvtError("issue search only implemented for gitea")
+        data = self.gitea_json("/repos/%s/issues?state=all&type=issues&limit=50&q=%s" % (full, urllib.parse.quote(query)))
+        if data is None:  # never "no record": a token without access to the private repo sees 404 too
+            raise WvtError("gitea: 讀不到 %s 的 issue（HTTP 404：repo 不存在、權杖沒有讀取權限，或沒開 issue）" % full)
+        if not isinstance(data, list):
+            raise WvtError("gitea: %s 的 issue 搜尋回應不是清單" % full)
+        return data
 
 
 _ADDON_TAG = re.compile(r"\b(v\d+\.0\.\d+\.\d+\.\d+)\b")
@@ -1657,25 +1921,37 @@ _ADDON_TAG = re.compile(r"\b(v\d+\.0\.\d+\.\d+\.\d+)\b")
 _NOTE_START = re.compile(r"^\s*#\s*(\d{4}-\d{2}-\d{2}\b|\d{3}:|前一顆|── )")
 
 
-def extract_addon_ref(values_text: str):
-    """Production platform addon tag from paas-app-bundle-cd values-prod.yaml.
+def extract_cd_image(values_text: str) -> dict:
+    """The top-level `image:` block of a CD values file: {registry, repository, tag, digest} (None if absent)."""
+    lines = values_text.splitlines()
+    img = {"registry": None, "repository": None, "tag": None, "digest": None}
+    start = next((i for i, ln in enumerate(lines) if re.match(r"^image:\s*(#.*)?$", ln)), None)
+    if start is None:
+        return img
+    for ln in lines[start + 1:]:
+        if not ln.strip() or ln.lstrip().startswith("#"):
+            continue
+        if not ln.startswith((" ", "\t")):
+            break
+        mm = re.match(r'^\s+(registry|repository|tag|digest):\s*["\']?([^"\'\s#]+)', ln)
+        if mm and img[mm.group(1)] is None:
+            img[mm.group(1)] = mm.group(2)
+    return img
 
-    The pinned image is structured (image.tag/digest) but the platform release it was built
-    from is only recorded in the comments above `image:` ("243: v18.0.1.0.243 / …",
-    "# 2026-10-22: addon .253（v18.0.1.0.253 → …）"). Notes are prepended — first inside the
-    '── image ──' block, since .253 at the top of the file — so the newest note names its tag
-    first. A tag whose note also names the pinned image tag wins (cross_checked); without
-    such a note the first mention does.
+
+def extract_addon_ref(values_text: str):
+    """The platform tag the release-note comments of a CD values file name (a cross-check only).
+
+    The comments above `image:` ("243: v18.0.1.0.243 / …", "# 2026-10-22: addon .253（v18.0.1.0.253 → …）")
+    are prepended by hand — first inside the '── image ──' block, since .253 at the top of the file — so
+    the newest note names its tag first. A tag whose note also names the pinned image tag wins
+    (cross_checked); without such a note the first mention does. The notes are not always updated
+    (10-26: the newest still said .258 while .265 was pinned), so ``drift`` takes the platform release
+    from the build record of the pinned image (build_record) and only reports a note that disagrees.
     """
     lines = values_text.splitlines()
     end = next((i for i, ln in enumerate(lines) if re.match(r"^image:", ln)), len(lines))
-    img = {}
-    for ln in lines[end + 1: end + 12]:
-        if ln and not ln.startswith(" "):
-            break
-        mm = re.match(r'^\s+(tag|digest):\s*["\']?([^"\'\s]+)', ln)
-        if mm:
-            img.setdefault(mm.group(1), mm.group(2))
+    img = extract_cd_image(values_text)
     comments = [ln for ln in lines[:end] if ln.lstrip().startswith("#")]
     cands = [(k, m.group(1)) for k, m in ((k, _ADDON_TAG.search(ln)) for k, ln in enumerate(comments)) if m]
     tag, checked = (cands[0][1] if cands else None), False
@@ -1691,31 +1967,138 @@ def extract_addon_ref(values_text: str):
     return {"tag": tag, "image_tag": img.get("tag"), "image_digest": img.get("digest"), "cross_checked": checked}
 
 
+_APPROVAL_CONTEXT = re.compile(r"<!--\s*approval-context\s*\n(.*?)-->", re.S)
+
+
+def approval_context(body) -> dict:
+    """KEY=value lines of the `<!-- approval-context … -->` block of a paas-odoo-ci approval issue."""
+    m = _APPROVAL_CONTEXT.search(body or "")
+    return dict(re.findall(r"^\s*([A-Z][A-Z0-9_]*)=(.*?)\s*$", m.group(1), re.M)) if m else {}
+
+
+def build_record(issues, workflow: str, image_name: str, image_tag: str):
+    """(platform tag | None, [issue numbers], reason | None): the release an image was built from.
+
+    paas-odoo-ci's build workflow opens a prod approval issue (author gitea-actions, title
+    "[prod-approval:<workflow>] Build <name>:<tag>") whose approval-context block is the input of the
+    build itself: the approved run restores IMAGE_NAME／IMAGE_TAG／ADDON_REF from it and checks that the
+    image's addon version equals the clone of ADDON_REF. Only such issues for exactly this image count;
+    none, or records that disagree, leave the release unknown.
+    """
+    prefix = "[prod-approval:%s]" % workflow
+    hits = []
+    for iss in issues or []:
+        if (iss.get("user") or {}).get("login") != BUILD_RECORD_AUTHOR or iss.get("pull_request"):
+            continue
+        if not str(iss.get("title") or "").startswith(prefix):
+            continue
+        ctx = approval_context(iss.get("body"))
+        if (ctx.get("WORKFLOW_MARKER"), ctx.get("IMAGE_NAME"), ctx.get("IMAGE_TAG")) != (workflow, image_name, image_tag):
+            continue
+        hits.append((iss.get("number"), ctx.get("ADDON_REF") or ""))
+    nums = sorted(n for n, _ in hits)
+    if not hits:
+        return None, [], "建置紀錄（%s 核可單）沒有 %s:%s" % (workflow, image_name, image_tag)
+    refs = sorted({r for _, r in hits})
+    if len(refs) > 1:
+        return None, nums, "建置紀錄互相矛盾：%s" % "、".join("#%s＝%s" % (n, r or "（空）") for n, r in sorted(hits))
+    if not PLATFORM_TAG_RE.match(refs[0]):
+        return None, nums, "建置紀錄 #%s 的 ADDON_REF %r 不是平台發版 tag" % (nums[0], refs[0])
+    return refs[0], nums, None
+
+
+def source_label(name: str, src: dict) -> str:
+    return src.get("label") or ("正式站" if name == "prod_platform" else name)
+
+
+def platform_word(label: str) -> str:
+    """'正式站平台版', 'staging 平台版' (a space after a Latin label)."""
+    return label + (" " if label[-1:].isascii() and label[-1:].isalnum() else "") + "平台版"
+
+
+def resolve_platform(f: Fetcher, name: str, src: dict) -> dict:
+    """The platform release a CD values file pins: the build record of the image it pins. This is what
+    the CD (main) asks Fleet to deploy, not proof of what runs: a failed Fleet apply or upgrade gate is
+    not visible here.
+
+    Never the release-note comments (a stale note would silently compare the wrong seed): when the
+    record cannot tell, `tag` is None and the report says the release is unknown.
+    """
+    b = src.get("builds") or {}
+    info = {"name": name, "label": source_label(name, src), "tag": None, "repo": src["repo"], "file": src["file"],
+            "registry": None, "image_repository": None, "image_tag": None, "image_digest": None,
+            "build_repo": b.get("repo"), "build_issues": [], "comment_tag": None, "unreachable": False, "reason": None,
+            "on_unknown": src.get("on_unknown", "drift")}
+    try:
+        text = f.read(src["repo"], src["file"], src.get("ref", "main"))
+    except WvtError as exc:
+        info.update(unreachable=True, reason="讀不到 %s:%s（%s）" % (src["repo"], src["file"], exc))
+        return info
+    if text is None:
+        info.update(unreachable=True, reason="讀不到 %s:%s（檔案不存在）" % (src["repo"], src["file"]))
+        return info
+    img = extract_cd_image(text)
+    info.update(registry=img["registry"], image_repository=img["repository"], image_tag=img["tag"],
+                image_digest=img["digest"], comment_tag=extract_addon_ref(text)["tag"])
+    if not (img["repository"] and img["tag"]):
+        info["reason"] = "%s 的 image 區塊沒有 repository／tag" % src["file"]
+        return info
+    try:
+        issues = f.search_issues(b["repo"], img["tag"])
+    except WvtError as exc:
+        info.update(unreachable=True, reason="讀不到建置紀錄 %s（%s）" % (b.get("repo"), exc))
+        return info
+    info["tag"], info["build_issues"], info["reason"] = build_record(issues, b.get("workflow"), img["repository"], img["tag"])
+    return info
+
+
+def _issue_refs(info: dict) -> str:
+    repo = str(info.get("build_repo") or "").split("/")[-1]
+    return "、".join("%s#%s" % (repo, n) for n in info.get("build_issues") or [])
+
+
+def unknown_is_info(info: dict) -> bool:
+    """The platform release is unknown although everything was readable, and the source says that is only
+    for reference (sources.<name>.on_unknown: info — staging on an addon-only QA build)."""
+    return not info.get("tag") and not info.get("unreachable") and info.get("on_unknown") == "info"
+
+
+def _info_only(info: dict) -> str:
+    return "只列參考、不算漂移（`sources.%s.on_unknown: info`）" % info.get("name")
+
+
+def platform_notes(info: dict) -> list:
+    if not info.get("tag"):
+        return ["%s**未知**：%s。用 `$%s` 的列不比對，也不沿用註記或舊值%s" % (
+            platform_word(info["label"]), info.get("reason"), info["name"], "；" + _info_only(info) if unknown_is_info(info) else "")]
+    out = []
+    if info.get("comment_tag") and info["comment_tag"] != info["tag"]:
+        out.append("%s：`%s` 檔頭最新的發版註記寫 %s，但釘的 image %s 依建置紀錄 %s 是 %s（註記沒更新；以建置紀錄為準）"
+                   % (info["label"], info["file"], info["comment_tag"], info.get("image_tag"), _issue_refs(info), info["tag"]))
+    return out
+
+
 def resolve_ref(ref: str, ctx: dict):
     if isinstance(ref, str) and ref.startswith("$"):
         return ctx.get(ref[1:])
     return ref
 
 
+def _ref_source(ref) -> str:
+    """Row source: branch, or the platform release the CD pins for a $source (prod, stg)."""
+    if isinstance(ref, str) and ref.startswith("$"):
+        return ref[1:].replace("_platform", "")
+    return "branch"
+
+
 def collect_drift(m: dict, f: Fetcher, today: _dt.date | None = None) -> dict:
     today = today or _dt.datetime.now(TAIPEI).date()
     ctx, notes = {}, []
     for name, src in (m.get("sources") or {}).items():
-        try:
-            text = f.read(src["repo"], src["file"], src.get("ref", "main"))
-            if text is None:
-                raise WvtError("file not found")
-            info = extract_addon_ref(text)
-            ctx[name] = info["tag"]
-            ctx[name + "_info"] = info
-            if not info["tag"]:
-                notes.append("無法從 %s 判讀正式站平台版" % src["file"])
-            elif not info["cross_checked"]:
-                notes.append("正式站平台版 %s 取自 %s 最上面的發版註記，該註記沒有寫到 image tag %s，無法交叉驗證"
-                             % (info["tag"], src["file"], info["image_tag"]))
-        except WvtError as exc:
-            notes.append("讀不到 %s:%s（%s）" % (src["repo"], src["file"], exc))
-            ctx[name] = None
+        info = resolve_platform(f, name, src)
+        ctx[name] = info["tag"]
+        ctx[name + "_info"] = info
+        notes.extend(platform_notes(info))
     catalogs = {}
     rows = []
     for pname, p in m["products"].items():
@@ -1725,16 +2108,20 @@ def collect_drift(m: dict, f: Fetcher, today: _dt.date | None = None) -> dict:
                 refs = [pin["ref"]] + list(pin.get("also_refs") or [])
                 for ref in refs:
                     rref = resolve_ref(ref, ctx)
-                    point = _point_label(pin, ref, rref)
+                    point = _point_label(pin, ref, rref, ctx)
                     row = {"product": pname, "leg": leg, "pin": pin["id"], "file": pin["file"], "repo": pin["repo"],
-                           "ref": rref, "point": point, "compare": pin.get("compare", "version"),
-                           "source": "prod" if str(ref).startswith("$") else "branch"}
+                           "ref": rref, "point": point, "compare": pin.get("compare", "version"), "source": _ref_source(ref)}
                     if rref is None:
-                        row.update(status="unreachable", version=None, observed=None,
-                                   findings=[finding("unreachable", "fetch", "無法解析 %s" % ref)])
+                        info = ctx.get(str(ref)[1:] + "_info") or {}
+                        st = "unreachable" if info.get("unreachable") else "info" if unknown_is_info(info) else "unknown"
+                        msg = "%s未知（%s），不比對" % (platform_word(info.get("label") or ref), info.get("reason") or "無法解析 %s" % ref)
+                        row.update(status=st, version=None, observed=None, findings=[finding(
+                            st, "fetch", msg + ("；" + _info_only(info) if st == "info" else ""))])
                         rows.append(row)
                         continue
                     rows.append(_observe_remote(m, p, leg, pin, rref, f, today, row))
+            if legd.get("coverage"):
+                rows.extend(_coverage_rows(p, pname, leg, legd, f, ctx))
             pub = legd.get("published")
             if pub:
                 rows.extend(_published_rows(p, pname, leg, legd, pub, f, today, catalogs))
@@ -1742,7 +2129,7 @@ def collect_drift(m: dict, f: Fetcher, today: _dt.date | None = None) -> dict:
             for pkg in ([pkgs] if isinstance(pkgs, dict) else pkgs):
                 for ref in [pkg.get("ref", legd.get("ref", "main"))] + list(pkg.get("also_refs") or []):
                     rref = resolve_ref(ref, ctx)
-                    rows.append(_package_row(pname, leg, legd, pkg, rref, ref, f))
+                    rows.append(_package_row(pname, leg, legd, pkg, rref, ref, f, ctx))
         for sf in p.get("shared_files") or []:
             rows.extend(_shared_rows(p, pname, sf, f))
         for n in p.get("notes") or []:
@@ -1766,10 +2153,15 @@ def collect_drift(m: dict, f: Fetcher, today: _dt.date | None = None) -> dict:
             "probes": f.probes, "drift": drift}
 
 
-def _point_label(pin, ref, rref):
+def _platform_point(ref, rref, ctx) -> str:
+    info = (ctx or {}).get(str(ref)[1:] + "_info") or {}
+    return "%s %s" % (info.get("label") or "正式站", rref or "未知")
+
+
+def _point_label(pin, ref, rref, ctx=None):
     base = pin.get("label") or pin["id"]
     if isinstance(ref, str) and ref.startswith("$"):
-        return "%s（正式站 %s）" % (base, rref or "?")
+        return "%s（%s）" % (base, _platform_point(ref, rref, ctx))
     return "%s（%s）" % (base, rref)
 
 
@@ -1790,9 +2182,40 @@ def _observe_remote(m, p, leg, pin, ref, f, today, row):
         row.update(status="unknown", version=None, observed=None,
                    findings=[finding("unknown", "extract", "解析失敗：%s" % exc)])
         return row
-    res = evaluate(p, leg, pin, obs, today)
+    res = evaluate(p, leg, pin, obs, today, order=f.commit_order)
     row.update(status=res["status"], version=res["version"], observed=obs, findings=res["findings"])
     return row
+
+
+def _coverage_rows(p, pname, leg, legd, f, ctx):
+    """One coverage row per point the leg's seed pins compare (their ref and also_refs). A point whose
+    platform release is unknown, or whose seed cannot be read, is left to the pin rows (they say why)."""
+    cov = legd["coverage"]
+    repo = legd.get("repo")
+    pinned = coverage_pins(p, leg)
+    points = []
+    for pin in iter_pins(p, leg):
+        if pin.get("record") in pinned and pin.get("kind") == "seed_image" and pin["file"] == cov["file"] and pin["repo"] == repo:
+            points += [r for r in [pin["ref"]] + list(pin.get("also_refs") or []) if r not in points]
+    rows = []
+    for ref in points:
+        rref = resolve_ref(ref, ctx)
+        try:
+            text = f.read(repo, cov["file"], rref) if rref else None
+        except WvtError:
+            text = None
+        if not text:
+            continue
+        try:
+            fs = coverage_findings(p, leg, text)
+        except (ET.ParseError, ValueError) as exc:
+            fs = [finding("unknown", "coverage", "解析失敗：%s" % exc)]
+        row = {"product": pname, "leg": leg, "pin": "coverage", "file": cov["file"], "repo": repo, "ref": rref,
+               "point": _point_label({"id": "coverage", "label": cov.get("label") or "範本覆蓋"}, ref, rref, ctx),
+               "compare": "coverage", "source": _ref_source(ref), "observed": None}
+        row.update(_rollup(fs))
+        rows.append(row)
+    return rows
 
 
 def _published_rows(p, pname, leg, legd, pub, f, today, catalogs):
@@ -1822,10 +2245,10 @@ def _published_rows(p, pname, leg, legd, pub, f, today, catalogs):
     return rows
 
 
-def _package_row(pname, leg, legd, pkg, rref, ref, f):
+def _package_row(pname, leg, legd, pkg, rref, ref, f, ctx=None):
     repo = pkg.get("repo") or legd.get("repo")
     row = {"product": pname, "leg": leg, "pin": "package_version", "file": pkg["file"], "repo": repo, "ref": rref,
-           "point": "%s（%s）" % (pkg.get("label", "包裝版號"), rref if not str(ref).startswith("$") else "正式站 %s" % rref),
+           "point": "%s（%s）" % (pkg.get("label", "包裝版號"), rref if not str(ref).startswith("$") else _platform_point(ref, rref, ctx)),
            "compare": "info"}
     try:
         text = f.read(repo, pkg["file"], rref) if rref else None
@@ -1893,6 +2316,23 @@ def _md(s):
     return str(s).replace("|", "\\|").replace("\n", " ")
 
 
+def render_platform_line(info: dict) -> str:
+    """'- 正式站平台版：`v18.0.1.0.265`（… 釘 image …；建置紀錄 paas-odoo-ci#420）', or 未知 with the reason."""
+    where = "%s:%s" % (str(info.get("repo") or "").split("/")[-1], info.get("file"))
+    if info.get("tag"):
+        return "- %s：`%s`（`%s` 釘 image `%s:%s@%s`；建置紀錄 %s 的 ADDON_REF）" % (
+            platform_word(info["label"]), info["tag"], where, str(info.get("image_repository") or "").split("/")[-1], info.get("image_tag"),
+            short(info.get("image_digest")), _issue_refs(info))
+    return "- %s：**未知**（%s）；用 `$%s` 的列不比對%s" % (platform_word(info.get("label") or "?"), _md(info.get("reason") or "?"), info.get("name"),
+                                                    "，" + _info_only(info) if unknown_is_info(info) else "")
+
+
+def _compared(statuses: list) -> list:
+    """The statuses the overview rolls up: a compared row that turned info (a platform release that is only
+    for reference, sources.<name>.on_unknown: info) does not hide the rows that were compared."""
+    return [s for s in statuses if s != "info"] or statuses
+
+
 def render_markdown(m: dict, rep: dict) -> str:
     out = []
     A = out.append
@@ -1902,10 +2342,8 @@ def render_markdown(m: dict, rep: dict) -> str:
     enf = rep.get("enforcement") or "report-only"
     A("- 產生時間：%s；第 %s 期，enforcement `%s`：本報告不擋流程；各邊 CI 的 `wvt check` %s"
       % (rep["generated_at"], rep["phase"], enf, FAIL_ON_TEXT[ENFORCEMENT.get(enf, "none")]))
-    prod = rep["context"].get("prod_platform_info") or {}
-    if rep["context"].get("prod_platform"):
-        A("- 正式站平台版：`%s`（`paas-app-bundle-cd:paas-odoo-platform/values-prod.yaml`，image `%s@%s`）"
-          % (rep["context"]["prod_platform"], prod.get("image_tag"), short(prod.get("image_digest"))))
+    for name in m.get("sources") or {}:
+        A(render_platform_line(rep["context"].get(name + "_info") or {"name": name, "label": name, "reason": "沒有讀取紀錄"}))
     A("- 只比上游身分（版本＋digest）；add-on 版號、chart 版號、JCR 時間戳 tag 只列參考，不跨邊比較。")
     A("")
     A("## 總覽")
@@ -1927,11 +2365,11 @@ def render_markdown(m: dict, rep: dict) -> str:
                 cells.append("—（沒有這一邊）")
                 continue
             rs = [r for r in rep["rows"] if r["product"] == pname and r["leg"] == leg and r["compare"] != "info"]
-            st = worst([r["status"] for r in rs]) if rs else "unknown"
+            st = worst(_compared([r["status"] for r in rs])) if rs else "unknown"
             vers = sorted({r["version"] for r in rs if r.get("version") and parse_version(r["version"])
                            and r["pin"] not in ("shared_files", "shared_source")}, key=parse_version)
             cells.append("%s %s" % (STATUS_LABELS[st], " / ".join(vers) or ""))
-        allst = worst([r["status"] for r in rep["rows"] if r["product"] == pname and r["compare"] != "info"] or ["unknown"])
+        allst = worst(_compared([r["status"] for r in rep["rows"] if r["product"] == pname and r["compare"] != "info"]) or ["unknown"])
         exc = [e for e in rep["exceptions"] if e["product"] == pname]
         concl = STATUS_LABELS[allst] + ("（有例外 %d）" % len(exc) if exc else "")
         A("| %s | %s%s | %s | %s | %s | %s |" % (
@@ -2038,19 +2476,35 @@ def gitea_call(api, token, method, path, body=None):
 
 
 def sync_issue(call, repo: str, label: str, title: str, body: str, drift: bool, run_url: str = ""):
-    """call(method, path, body) -> json. Returns (action, issue_number)."""
+    """call(method, path, body) -> json. Returns (action, issue_number).
+
+    One tracking issue for good: drift reopens the newest closed one (it carries TRACKING_MARKER) with
+    the new report and a comment — the watchers get notified and the history stays in one place —
+    instead of opening another; a new issue is only made when there has never been one.
+
+    Only an issue whose body carries TRACKING_MARKER is the tracking issue. Another issue with the same
+    label (someone's own note, open or closed) is never edited, closed or reopened.
+    """
     labels = call("GET", "/repos/%s/labels?limit=50" % repo) or []
     lab = next((x for x in labels if x["name"] == label), None)
     if lab is None:
         lab = call("POST", "/repos/%s/labels" % repo,
                    {"name": label, "color": "#e99695", "description": "woow release train：版本漂移追蹤（自動）"})
     issues = call("GET", "/repos/%s/issues?state=open&type=issues&labels=%s&limit=50" % (repo, urllib.parse.quote(label))) or []
-    mine = [i for i in issues if TRACKING_MARKER in (i.get("body") or "")] or issues
+    mine = [i for i in issues if TRACKING_MARKER in (i.get("body") or "")]
     current = mine[0] if mine else None
     if drift:
         if current:
             call("PATCH", "/repos/%s/issues/%d" % (repo, current["number"]), {"title": title, "body": body})
             return "updated", current["number"]
+        closed = call("GET", "/repos/%s/issues?state=closed&type=issues&labels=%s&limit=50" % (repo, urllib.parse.quote(label))) or []
+        closed = sorted((i for i in closed if TRACKING_MARKER in (i.get("body") or "")), key=lambda i: -i["number"])
+        if closed:
+            num = closed[0]["number"]
+            call("PATCH", "/repos/%s/issues/%d" % (repo, num), {"title": title, "body": body, "state": "open"})
+            call("POST", "/repos/%s/issues/%d/comments" % (repo, num),
+                 {"body": "最新一次 drift 又有落後或無法判讀的項目，重新打開並更新報告。" + (" 執行紀錄：%s" % run_url if run_url else "")})
+            return "reopened", num
         new = call("POST", "/repos/%s/issues" % repo, {"title": title, "body": body, "labels": [lab["id"]]})
         return "created", new["number"]
     if current:
@@ -2077,6 +2531,10 @@ def cmd_issue(args) -> int:
     action, num = sync_issue(lambda mth, p, b=None: gitea_call(api, token, mth, p, b), args.repo, args.label,
                              args.title, body, bool(rep.get("drift")), args.run_url)
     print("tracking issue: %s #%s" % (action, num))
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:  # the run stays green on drift (drift.yml): say in the run itself what it found
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write("### 版本漂移：drift=%s\n\n追蹤 issue：%s #%s\n" % (str(bool(rep.get("drift"))).lower(), action, num))
     return 0
 
 

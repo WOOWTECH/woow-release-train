@@ -42,10 +42,14 @@ HA 和 PaaS 各自升版，結果常常不一致。例如 n8n 在 HA 已是 2.43
 schema: 1
 phase: 1                      # 0 只報告 → 1 警告＋硬規則 → 2 機器人 PR → 3 擴大
 enforcement: hard-rules       # 各邊 CI 擋什麼：report-only（都不擋）／hard-rules（只擋硬規則）／strict（任何漂移都擋）
-sources:
-  prod_platform:              # 正式站 Fleet 釘的平台版（從 CD values-prod.yaml 的註解讀 addon_ref）
+sources:                      # CD 釘給正式站／staging 的平台版：CD main 的 values 釘的 image → 建置核可單的 ADDON_REF
+  prod_platform:
+    label: 正式站
     repo: "gitea:woow-paas/paas-app-bundle-cd"
     file: paas-odoo-platform/values-prod.yaml
+    kind: cd_image
+    builds: {repo: "gitea:woow-paas/paas-odoo-ci", workflow: build-image.yml}
+  stg_platform: { label: staging, file: paas-odoo-platform-stg/values-stg.yaml, ..., on_unknown: info }   # 判讀不出來只列參考
 products:
   <產品>:
     upstream: { image: docker.io/..., source: "github:org/repo" }
@@ -68,7 +72,7 @@ products:
         consumers: [{ leg: ha, repo: ..., lock: ... }]
     legs:
       ha:   { repo: "github:WOOWTECH/...", pins: [...], package_version: [...], published: {kind: catalog, ...} }
-      paas: { pins: [...], package_version: [...] }
+      paas: { pins: [...], package_version: [...], coverage: { file: ..., image: '<regex>', exclude: { <record>: <理由> } } }
     exceptions:                     # 必須有 what / reason / approved_by / expires；到期 validate 就失敗
       - { leg: ha, what: ..., reason: ..., approved_by: ..., expires: "YYYY-MM-DD", waives: [behind] }
 observations: [...]                 # 線上部署的手動快照（非真相來源，只供報告參考）
@@ -97,7 +101,10 @@ probes: { api.github.com: https://api.github.com/rate_limit }   # 只測連線�
 - `parse`：`version`（預設）、`image_ref`（`repo:tag@sha256:…`）或 `digest`（純 sha256）。
 - `compare`：`version`、`index_digest`、`platforms.<arch>`、`artifacts.<名稱>`、`identity.<名稱>`（`target.identity` 裡的 commit、build id、fork 的上游版本），或 `info`（只列參考，不比較）。
 - `match: prefix`：identity 允許短 sha（至少 7 碼）；`tag_as_version: true`：seed 映像的 tag 就是版本（例如 OpenDesign 外殼 tag＝core build id）。
-- `ref`：分支或 tag。`$prod_platform` 代表正式站平台版；`also_refs: [develop]` 會同時比 develop。
+- `digest: artifacts.<名稱>`（identity 釘點用）：tag 等於目標時，digest 也必須是 `target` 記的那次建置，否則「不符」。例如 PaaS MCP 映像 tag＝woow-mcp-server commit、digest＝那次 CI 建置。
+- `history: "gitea:OWNER/REPO"`（identity 釘點用）：commit 不是目標、`known_versions` 也沒記（`known_versions[].identity`）時，`drift` 問 Gitea 先後——目標之前的 commit＝落後 🟠、之後＝領先 🔵（清冊要跟上）、分岔或不存在＝不符 🔴。離線的 `check` 不問，一律「不符」。
+- `coverage`（leg 層級，選填）：seed 裡 `helm_default_values` 的 `image.repository` 符合 `image`（regex）的 record，都必須是這一邊的 `seed_image` 釘點，或寫在 `exclude` 並附理由；沒釘也沒排除的新範本，在 `drift`（每個比對點）與 `check`（平台 PR）都是 ❔。woow-mcp-server 用它抓「新增的 `*-mcp-admin` 範本」，`cloud_app_mcp_odoo_manage` 寫在 exclude（映像凍結在 d5032a72）。
+- `ref`：分支或 tag。`$prod_platform`／`$stg_platform` 代表 CD 釘給正式站／staging 的平台版（CD main 釘的 image 的平台版，不是 Fleet 實際套用的結果；見下面 `drift` 的資料來源）；`also_refs: [$stg_platform, develop]` 會同時比這些點。
 
 **只比上游身分。** add-on 版號、chart 版號、JCR 時間戳 tag 都是各邊自己的包裝，只放在 `package_version` 列參考。例如 HA EMQX 的 add-on 標 5.9.1，實際包的是上游 5.8.9；授權上限 `<5.9.0` 只看 5.8.9。
 
@@ -129,7 +136,11 @@ python3 -m unittest discover -s tests -v
 `drift` 的資料來源：
 
 - **HA**：GitHub 公開 raw；讀不到時改用 api.github.com。另外讀 Store `catalog.json`，並在 catalog 記錄的 `source_sha` 上重讀釘點，這就是「已發佈」的版本。
-- **PaaS**：Gitea API。seed 比兩個版本：正式站 CD 釘的平台 tag，以及 develop。charts 和 paas-odoo-ci 比 main。
+- **PaaS**：Gitea API。seed 比 CD 釘給正式站的平台 tag 與 develop（PaaS MCP 映像另比 staging）；charts 和 paas-odoo-ci 比 main。
+- **平台版從哪來**：`sources.<名稱>`（kind `cd_image`）讀 CD（`paas-app-bundle-cd` main）values 的 `image.repository`＋`image.tag`，再到 `builds` 的 paas-odoo-ci 建置核可單（作者 `gitea-actions`、標題 `[prod-approval:build-image.yml] Build <repository>:<tag>`）取 `approval-context` 的 `ADDON_REF`。核可後的建置就是用這組值 clone 平台、再驗 image 內 addon 版號＝clone 版號，所以它就是那顆 image 的平台版。找不到、互相矛盾、不是 `v18.x` tag → 報告寫「**未知**」，`$<名稱>` 的列標 ❔（讀不到檔或核可單是 ⚠️）、drift＝true，不退回檔頭的發版註記；註記只用來交叉比對，和建置紀錄不同時寫在備註。來源設了 `on_unknown: info`（staging）時，「讀得到、但判讀不出來」只列 ℹ️、不算漂移：staging 平時跑沒有核可單的 addon-only 建置（下面「已知限制」），算進漂移的話追蹤 issue 整個 QA 期間都會開著；讀不到（⚠️）照樣算。正式站維持預設（`drift`）。
+- **Gitea 的 ref 先解析成完整 commit sha**：Gitea 的 raw API 只認分支、tag 和完整 sha；不存在的 tag／分支、以及確實存在的短 sha，都會回預設分支的內容（HTTP 200）。所以讀檔前先用 commits API 把 ref 解析成完整 sha（分支、tag、短 sha 都行；不存在就當「檔案不存在」），再用這個完整 sha 讀 raw。同一次執行裡每個 repo＋ref 只查一次，同一個分支的各檔案也都讀同一個 commit。
+- **404 分清「不存在」和「讀不到」**：Gitea 對權杖看不到的私人 repo 一律回 404（repo 本身、commits、raw、issue 都是，10-26 實測）。repo 內的 404 要先確認 repo 本身看得到才算「不存在」（❔）；repo 看不到、或建置核可單的 issue 搜尋回 404，一律算「讀不到」（⚠️），報告不會寫成「沒有核可單」或「檔案不存在」——`CI_GITEA_TOKEN` 失去 paas-odoo-ci 或 CD 的讀取權限時，一眼就看得出來。
+- **PaaS MCP 映像**（產品 `woow-mcp-server`）：8 個 MCP 範本（`cloud_app_mcp_*`）的 image tag 比清冊的 woow-mcp-server 目標 commit、digest 比目標那次建置；正式站、staging、develop 三個點都比。每個點另有一列「範本覆蓋」（`coverage`：seed 裡所有 `*-mcp-admin` 範本都有釘點或寫明排除理由），8 個範本的 chart 版號列成參考（正式站、develop）。
 - **共用檔**：比對 HA lock 記錄的 git blob 和 charts main 的 blob。
 - **連線狀況**：每個端點的連線結果會列在報告最後。
 
@@ -138,14 +149,14 @@ python3 -m unittest discover -s tests -v
 | Workflow | 觸發 | 做什麼 |
 |---|---|---|
 | `ci.yml` | push、PR | `wvt validate`＋單元測試。只擋本 repo 的清冊 PR |
-| `drift.yml` | 每天台北 08:41、手動 | 跑 `wvt drift`，維護**一張**帶 `version-drift` label 的 issue：有漂移就建立或更新，沒有就留言後關閉 |
+| `drift.yml` | 每天台北 08:41、清冊或 `tools/wvt.py` 推到 main、手動 | 跑 `wvt drift`，維護**一張**帶 `version-drift` label、內文有 `<!-- wvt:drift-tracking -->` 標記的追蹤 issue（#4）：有漂移就更新（關著就重新打開並留言），沒有就留言後關閉。同 label 但沒有標記的 issue（別人自己開的）一律不碰。漂移不讓 job 失敗（理由見 drift.yml 檔頭）；結果寫在執行摘要 |
 | `mirror-github.yml` | push main／tag、每天、手動 | 用 deploy key（repo secret `GH_MIRROR_DEPLOY_KEY`）把 main 和 tag 推到 GitHub |
 | `.github/workflows/wvt-check.yml` | 只在 GitHub（`workflow_call`） | HA repo 呼叫的可重用檢查。Gitea 有 `.gitea/workflows` 就不讀 `.github/workflows`，所以它只在鏡像上被使用 |
 | `bots.yml` | 每天台北 09:11、清冊合併到 main、手動 | 第 2 期機器人 propose／fanout，做什麼照清冊 `bots:`；結果寫在執行摘要 |
 
 權杖：
 
-- 跨 repo 讀取用 org secret `CI_GITEA_TOKEN`，因為 `paas-app-bundle-cd` 是私人 repo。
+- 跨 repo 讀取用 org secret `CI_GITEA_TOKEN`，因為 `paas-app-bundle-cd`、`paas-odoo-ci`（建置核可單）是私人 repo。
 - 寫本 repo 的 issue 用每次執行自動發的 `GITEA_TOKEN`。
 - 沒有任何 workflow 會合併或核可東西。
 
@@ -222,12 +233,13 @@ jobs:
 - **模式在清冊**：`bots.<名稱>` 是 `off`、`dry-run`（只在執行摘要列計畫）或 `open-pr`。改模式也是清冊 PR。
 - **一個產品、一個 repo、一個分支**：`wvt/propose-<產品>`、`wvt/fanout-<產品>`。重跑只更新同一張 PR；內容沒變就不推；那一邊對齊後，機器人關掉自己的 PR。
 - **被關掉的提案不重開**：版本負責人關掉（不合併）的同一個提案不會再開。要重提，手動執行 `bots.yml` 並填 `product`、`version`。
-- **安全邊界**：不提超過授權上限的版本；某一邊釘的 digest 跟上游查到的不同就不提案（往前那一邊同一個 repo 裡的產物雜湊也算，例如 uv.lock 的 sdist hash、Dockerfile 的 tarball sha256；相同時寫進 `verified`）；PyPI 已撤回（yanked）、npm 已棄用（deprecated）的版本不提案；`target.identity` 裡機器人查不到的值（commit、build id）只在計畫註明，由人改清冊；禁止降版的產品不往下提；鏡像核可單被拒或逾時不自動重送。
+- **安全邊界**：不提超過授權上限的版本；某一邊釘的 digest 跟上游查到的不同就不提案（往前那一邊同一個 repo 裡的產物雜湊也算，例如 uv.lock 的 sdist hash、Dockerfile 的 tarball sha256；相同時寫進 `verified`）；PyPI／npm 一律先查 registry：不存在、PyPI 已撤回（yanked）、npm 已棄用（deprecated）的版本不提案；`target.identity` 裡機器人查不到的值（commit、build id）只在計畫註明，由人改清冊；比目前目標低的版本不提，除非明確帶 `--allow-downgrade`（`bots.yml` 的 `allow_downgrade=true`，PR 標「降版」）——高低照 SemVer §11：預發版排在正式版之前（`2.96.2-beta.1` 低於 `2.96.2`，算降版），build metadata（`+…`）不影響；和目標排不出先後的寫法（PEP 440 的 `2.0.0rc1`、`2.2.0.post1`、`1.0.dev3` 等）一律不提，帶旗標也一樣，而且在查 registry 之前就擋；禁止降版（`downgrade: forbidden`）的產品帶了也不提；鏡像核可單被拒或逾時不自動重送。
 - **PR 只是起點**：機器人只改清冊知道的釘點。文件、測試、遷移說明由各 repo 的 CI 與審核者補齊；資料遷移單向的產品（n8n）PR 內文要求附升級證據。
 
 ```sh
 GITEA_READ_TOKEN=… python3 tools/wvtbot.py --mode dry-run          # 本機看三個機器人的計畫
 python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode dry-run   # 先改清冊的手動升版
+python3 tools/wvtbot.py --bot propose --product mcp-n8n --version 2.96.2 --allow-downgrade --mode dry-run   # 刻意降版
 ```
 
 第 2 期用到的清冊欄位：
@@ -236,7 +248,7 @@ python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode
 |---|---|
 | `upstream.image_tag` | 版本對應的映像 tag，預設 `{version}`（Hermes 用 `v{version}`） |
 | `upstream.artifact_sha256.<名稱>` | 非映像產物（例如 EMQX tarball）的 `.sha256` 網址，含 `{version}` |
-| `upstream.package` | `pypi:<名稱>`／`npm:<名稱>`：propose 到套件 registry 查新版。PyPI 一律查 `https://pypi.org/pypi/<名稱>/<版本>/json`（撤回的不提案），`target.artifacts` 的 `sdist`（.tar.gz）、`wheel`（唯一的 wheel）取 `urls[].digests.sha256`。npm 只在 `target.identity` 有 `integrity`／`shasum` 時查 `https://registry.npmjs.org/<名稱>/<版本>` 的 `dist.*`（npm 不提供 sha256，所以不放 `artifacts`；棄用的不提案）。`verified` 寫實際來源，例如 `pypi odoo-mcp 1.3.0（sdist sha256 取自 PyPI JSON）`、`npm n8n-mcp 2.96.2`；有映像才寫 `registry <image>:<tag>` |
+| `upstream.package` | `pypi:<名稱>`／`npm:<名稱>`：propose 到套件 registry 查新版。PyPI 一律查 `https://pypi.org/pypi/<名稱>/<版本>/json`（撤回的不提案），`target.artifacts` 的 `sdist`（.tar.gz）、`wheel`（唯一的 wheel）取 `urls[].digests.sha256`。npm 一律查 `https://registry.npmjs.org/<名稱>/<版本>`（不存在、棄用、回的不是這一版都不提案）；`target.identity` 有 `integrity`／`shasum` 時再取 `dist.*`（npm 不提供 sha256，所以不放 `artifacts`）。`verified` 寫實際來源，例如 `pypi odoo-mcp 1.3.0（sdist sha256 取自 PyPI JSON）`、`npm n8n-mcp 2.96.2（npm registry 確認已發佈、未棄用）`；有映像才寫 `registry <image>:<tag>` |
 | `package_version[].bump` | fanout 時包裝版號怎麼變：`same`＝等於上游版本、`patch`＝+0.0.1、`none`（預設）＝不動 |
 | `legs.<邊>.fanout.changelog` | 要加一行的 CHANGELOG；`changelog_entry`／`changelog_shared` 改寫那一行的文字 |
 | `legs.paas.mirror` | `{dest_name, digest}`：PaaS 釘的是 JCR 鏡像時，fanout 先 dispatch mirror-image |
@@ -249,7 +261,7 @@ python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode
 2. 決定 `policy.mode`。range 必須寫 `min_version`、`max_days_behind`、`target.since`。
 3. 為 `ha`、`paas` 各列出釘點（`pins`），包裝版號放 `package_version`；HA 有上架 Store 的加 `published`。
 4. 如果某邊目前停在舊 digest，把該版加進 `known_versions`，報告才能換算出版本。
-5. 本機跑 `python3 tools/wvt.py validate`、`python3 -m unittest discover -s tests`，以及 `drift`（需要 Gitea 權杖，放環境變數 `GITEA_READ_TOKEN`）。單元測試讀的是凍結快照 `tests/fixtures/woow-versions.yaml`（和 fixtures 配套），線上清冊只驗格式；機器人改線上清冊不會讓測試壞掉。新產品要測讀法時，把它加進快照與 fixtures。
+5. 本機跑 `python3 tools/wvt.py validate`、`python3 -m unittest discover -s tests`，以及 `drift`（需要 Gitea 權杖，放環境變數 `GITEA_READ_TOKEN`）。單元測試讀的是凍結快照 `tests/fixtures/woow-versions.yaml`（和 fixtures 配套），線上清冊只驗格式；機器人改線上清冊不會讓測試壞掉。新產品要測讀法時，把它加進快照與 fixtures。單元測試完全不連網：`tests/helpers.py` 一載入就擋掉 loopback 以外的連線（有測試想連網會直接報錯，不會被 `wvt` 的連線錯誤處理吞掉），需要的 registry／Gitea 回應一律錄成 fixtures。
 6. 開 PR。改清冊就是改版本政策，**一律人工合併**。
 
 ## 分期
@@ -274,6 +286,8 @@ python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode
 ## 已知限制
 
 - PaaS「已部署」欄目前是手動快照（`observations`，有日期，超過 14 天會警告）。改由平台自動回報列在後續工作，第 1 期仍是手動。
-- 正式站平台版只寫在 CD values 的註解裡（例如 `# 2026-10-22: addon .253（v18.0.1.0.253 → …）`）。`wvt` 取最上面一筆發版註記，並要求該註記寫到 `image.tag` 才算交叉驗證；驗不到會在報告備註，完全讀不到時退回只比 develop。
+- 平台版靠建置核可單對 image tag：staging 專用的 addon-only 建置（`build-paas-official-staging.yml`，推到 `paas-odoo-official-stg`）沒有核可單，staging 釘這種 image 時 staging 平台版是「未知」（10-23～26 的 7 次 staging 發版都是這種建置）：清冊設 `on_unknown: info`，這段期間 staging 的列只列參考、不比對，也不算漂移。核可單沒有 digest，所以是用 tag（建置當下時間產生）對應，digest 只顯示不驗。
+- **drift 看的是 CD 釘的版本，不是正式站實際跑的版本**：`$prod_platform`／`$stg_platform` 來自 CD main 的 values 檔。Fleet 套用失敗、upgrade-gate 失敗、`valuesFrom` secret 覆寫 image 都看不到（10-26 查 CD 的 fleet.yaml：values 來自 `valuesFiles` 與注入密鑰的 `valuesFrom` secret，沒有 targetCustomizations）。所以 drift 的結果不能當正式站實際部署狀態的證據；正式站實際版號要另外唯讀驗（平台 odoo shell 的模組版號，或 Pod 的 imageID）。
+- **建置紀錄只信核可單內文**：`build_record` 只認作者 `gitea-actions` 開的核可單（擋掉 internal repo 裡任何登入者都能開的假單），但 paas-odoo-ci 有寫入權限的人改得動內文，wvt 讀的是現在的內文。`APPROVAL_SEAL` 刻意不驗：封緘是 `CI_GITEA_TOKEN` 的函數（scripts/approval-seal.sh），權杖一輪替，所有舊核可單——包括正式站現在釘的那張——都驗不過，正式站平台版就會一直是「未知」；本 repo 也拿不到那支權杖來測驗算。核可單也沒記 digest，CD 釘的 digest 對不回核可單。要加固得在 paas-odoo-ci 做：建置完成時把推上去的 digest 留言在核可單上，wvt 再比對 CD 的 digest。
 - JCR 需要憑證，本 repo 不讀 JCR。PaaS 的 digest 身分靠 seed 裡的 `tag@sha256`：JCR 鏡像用 `--preserve-digests`，與上游 digest 逐字相同。
 - YAML 子集不支援 anchor、alias、tag、多文件，也不支援「折疊字串裡再縮排」這類罕見寫法。各邊的 Chart.yaml、values.yaml、config.yaml 已驗證可正確解析。
