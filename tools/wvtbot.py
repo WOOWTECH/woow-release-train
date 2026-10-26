@@ -931,7 +931,10 @@ def plan_propose(m: dict, rep: dict, f, registry: Registry, today, only=None, fo
     """[{product, version, target, shared, reasons, notes, downgrade}] for products to bump in the manifest.
 
     A version below the current target is only proposed with allow_downgrade (--allow-downgrade), and
-    never for a product whose policy forbids downgrades.
+    never for a product whose policy forbids downgrades. "Below" is SemVer §11 precedence
+    (wvt.cmp_release): `2.96.2-beta.1` is below `2.96.2`. A version that cannot be ordered against the
+    target (PEP 440 `2.0.0rc1`／`2.2.0.post1`, anything else) is refused before any registry lookup,
+    flag or not: neither gate could be applied, and it could not be a manifest target anyway.
     """
     plans = []
     for pname, p in m["products"].items():
@@ -944,16 +947,20 @@ def plan_propose(m: dict, rep: dict, f, registry: Registry, today, only=None, fo
                  and r["compare"] not in ("info", "shared_files") and any(x["status"] == "ahead" for x in r["findings"])
                  and wvt.parse_version(r.get("version")) and wvt.cmp_versions(r["version"], tv) > 0]
         version = force_version if force_version and only == pname else None
-        if not version and ahead:
-            version = max((r["version"] for r in ahead), key=wvt.parse_version)
+        if not version and ahead:  # the highest by release precedence: 2.97.0 over 2.97.0-rc.1
+            version = max((r["version"] for r in ahead), key=lambda v: wvt.release_key(v) or (wvt.parse_version(v), 0, ()))
             plan["reasons"] = ["%s %s：%s（%s）" % (wvt.LEG_NAMES[r["leg"]], r["point"], r["version"], r["file"])
                                for r in ahead if r["version"] == version]
         elif version:
             plan["reasons"] = ["手動指定（workflow_dispatch）：%s" % version]
         if version and version != tv:
             ceiling = (p.get("policy") or {}).get("license_ceiling")
-            lower = (wvt.cmp_versions(version, tv) or 0) < 0
-            if ceiling and not wvt.satisfies(version, ceiling):
+            order = wvt.cmp_release(version, tv)
+            lower = order is not None and order < 0
+            if order is None:
+                plan["notes"].append("%s 和清冊目標 %s 排不出先後（只認 x.y.z 與 SemVer 預發版 x.y.z-rc.1；PEP 440 的 "
+                                     "a／b／rc／post／dev 寫法不認），不提案" % (version, tv))
+            elif ceiling and not wvt.satisfies(version, ceiling):
                 plan["notes"].append("%s 超過授權上限 %s，不提案" % (version, ceiling))
             elif lower and (p.get("policy") or {}).get("downgrade") == "forbidden":
                 plan["notes"].append("%s 低於清冊 %s，而此產品禁止降版，不提案" % (version, tv))

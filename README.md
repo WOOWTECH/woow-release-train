@@ -231,7 +231,7 @@ jobs:
 - **模式在清冊**：`bots.<名稱>` 是 `off`、`dry-run`（只在執行摘要列計畫）或 `open-pr`。改模式也是清冊 PR。
 - **一個產品、一個 repo、一個分支**：`wvt/propose-<產品>`、`wvt/fanout-<產品>`。重跑只更新同一張 PR；內容沒變就不推；那一邊對齊後，機器人關掉自己的 PR。
 - **被關掉的提案不重開**：版本負責人關掉（不合併）的同一個提案不會再開。要重提，手動執行 `bots.yml` 並填 `product`、`version`。
-- **安全邊界**：不提超過授權上限的版本；某一邊釘的 digest 跟上游查到的不同就不提案（往前那一邊同一個 repo 裡的產物雜湊也算，例如 uv.lock 的 sdist hash、Dockerfile 的 tarball sha256；相同時寫進 `verified`）；PyPI／npm 一律先查 registry：不存在、PyPI 已撤回（yanked）、npm 已棄用（deprecated）的版本不提案；`target.identity` 裡機器人查不到的值（commit、build id）只在計畫註明，由人改清冊；比目前目標低的版本不提，除非明確帶 `--allow-downgrade`（`bots.yml` 的 `allow_downgrade=true`，PR 標「降版」）；禁止降版（`downgrade: forbidden`）的產品帶了也不提；鏡像核可單被拒或逾時不自動重送。
+- **安全邊界**：不提超過授權上限的版本；某一邊釘的 digest 跟上游查到的不同就不提案（往前那一邊同一個 repo 裡的產物雜湊也算，例如 uv.lock 的 sdist hash、Dockerfile 的 tarball sha256；相同時寫進 `verified`）；PyPI／npm 一律先查 registry：不存在、PyPI 已撤回（yanked）、npm 已棄用（deprecated）的版本不提案；`target.identity` 裡機器人查不到的值（commit、build id）只在計畫註明，由人改清冊；比目前目標低的版本不提，除非明確帶 `--allow-downgrade`（`bots.yml` 的 `allow_downgrade=true`，PR 標「降版」）——高低照 SemVer §11：預發版排在正式版之前（`2.96.2-beta.1` 低於 `2.96.2`，算降版），build metadata（`+…`）不影響；和目標排不出先後的寫法（PEP 440 的 `2.0.0rc1`、`2.2.0.post1`、`1.0.dev3` 等）一律不提，帶旗標也一樣，而且在查 registry 之前就擋；禁止降版（`downgrade: forbidden`）的產品帶了也不提；鏡像核可單被拒或逾時不自動重送。
 - **PR 只是起點**：機器人只改清冊知道的釘點。文件、測試、遷移說明由各 repo 的 CI 與審核者補齊；資料遷移單向的產品（n8n）PR 內文要求附升級證據。
 
 ```sh

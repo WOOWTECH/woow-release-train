@@ -258,6 +258,79 @@ class DowngradeTest(unittest.TestCase):
         _, plan, _ = self.plan("mcp-n8n", "2.96.2", "2.92.1")
         self.assertEqual((plan["version"], plan["downgrade"]), ("2.96.2", False))
 
+    def test_versions_that_cannot_be_ordered_are_refused_first(self):
+        # review 09／15: `--version 2.0.0rc1` (PyPI mcp really has 2.0.0a1…rc1, all below 2.3.0) passed the
+        # downgrade gate as "not lower" (cmp None → 0), reached PyPI, then crashed validate_manifest
+        for version in ("2.0.0rc1", "1.3.0rc1", "2.2.0.post1", "1.0.dev3", "2.4.0rc1", "latest"):
+            for allow in (False, True):  # the flag cannot help: neither gate could be applied
+                _, plan, reg = self.plan("mcp-python-sdk", version, "2.3.0", allow=allow)
+                self.assertIsNone(plan["target"], version)
+                self.assertEqual(plan["notes"], ["%s 和清冊目標 2.3.0 排不出先後（只認 x.y.z 與 SemVer 預發版 x.y.z-rc.1；"
+                                                 "PEP 440 的 a／b／rc／post／dev 寫法不認），不提案" % version])
+                self.assertEqual(reg.urls, [], version)
+
+    def test_a_semver_pre_release_is_below_its_release(self):
+        # review 09: 2.96.2-beta.1 compared equal to 2.96.2 (suffix ignored) and became a plain upgrade PR
+        _, plan, reg = self.plan("mcp-n8n", "2.96.2-beta.1", "2.96.2")
+        self.assertIsNone(plan["target"])
+        self.assertEqual(plan["notes"], ["2.96.2-beta.1 低於清冊目標 2.96.2：降版要明確帶 --allow-downgrade（bots.yml 的 "
+                                         "allow_downgrade=true），不提案"])
+        self.assertEqual(reg.urls, [])
+        beta = "https://registry.npmjs.org/n8n-mcp/2.96.2-beta.1"
+        RECORDED[beta] = RECORDED["https://registry.npmjs.org/n8n-mcp/2.96.2"]
+        self.addCleanup(RECORDED.pop, beta)
+        m = manifest()
+        m["products"]["mcp-n8n"]["target"]["version"] = "2.96.2"
+        reg = Registries({beta: lambda d: dict(d, version="2.96.2-beta.1")})
+        rep = wvt.collect_drift(m, FakeFetcher(), TODAY)
+        plan = wvtbot.plan_propose(m, rep, FakeFetcher(), Oci(), TODAY, only="mcp-n8n", force_version="2.96.2-beta.1", get=reg,
+                                   allow_downgrade=True)[0]
+        self.assertEqual((plan["version"], plan["downgrade"]), ("2.96.2-beta.1", True))
+        self.assertIn("清冊目標 2.96.2 → 2.96.2-beta.1（降版）", wvtbot.render_propose(m, plan, "abc1234")[0])
+
+    def test_pre_release_order_against_the_target(self):
+        for version, tv, lower in (("2.97.0-rc.1", "2.96.2", False),   # a newer core: an upgrade
+                                   ("2.97.0", "2.97.0-rc.1", False),   # the release of a pre-release target
+                                   ("2.97.0-rc.2", "2.97.0-rc.1", False),
+                                   ("2.97.0-rc.1", "2.97.0-rc.2", True),
+                                   ("2.96.1-beta.1", "2.96.2", True)):
+            _, plan, reg = self.plan("mcp-n8n", version, tv)
+            refused = any("降版要明確帶 --allow-downgrade" in n for n in plan["notes"])
+            self.assertEqual(refused, lower, (version, tv, plan["notes"]))
+            self.assertEqual(reg.urls != [], not lower, (version, tv))  # upgrades go on to the registry
+
+    def test_the_highest_ahead_version_by_release_precedence(self):
+        # two legs ahead with the same core: the release beats its pre-release whatever the row order
+        m = manifest()
+        m["products"]["mcp-n8n"]["target"]["version"] = "2.96.2"
+
+        def row(leg, version):
+            return {"product": "mcp-n8n", "leg": leg, "source": "branch", "compare": "version", "version": version,
+                    "point": "p", "file": "f", "repo": "r", "ref": "main", "findings": [{"status": "ahead"}]}
+        for order in (("2.97.0-rc.1", "2.97.0"), ("2.97.0", "2.97.0-rc.1")):
+            reg = Registries()
+            rep = {"rows": [row("ha", order[0]), row("paas", order[1])]}
+            plan = wvtbot.plan_propose(m, rep, FakeFetcher(), Oci(), TODAY, only="mcp-n8n", get=reg)[0]
+            self.assertEqual(reg.urls, ["https://registry.npmjs.org/n8n-mcp/2.97.0"], order)
+            self.assertEqual(plan["reasons"], ["%s p：2.97.0（f）" % ("PaaS" if order[1] == "2.97.0" else "HA")])
+
+    def test_cli_pre_release_does_not_crash_the_run(self):
+        # review 15b: the same dry-run ended in a traceback (exit 1) before
+        orig_f, orig_r = wvtbot.BotFetcher, wvtbot.Registry
+
+        class F(FakeFetcher):
+            def __init__(self, *a, **k):
+                super().__init__()
+        wvtbot.BotFetcher, wvtbot.Registry = F, Oci
+        self.addCleanup(setattr, wvtbot, "BotFetcher", orig_f)
+        self.addCleanup(setattr, wvtbot, "Registry", orig_r)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rc = wvtbot.main(["--manifest", MANIFEST_PATH, "--today", "2026-10-24", "--mode", "dry-run", "--bot", "propose",
+                              "--product", "mcp-python-sdk", "--version", "2.0.0rc1"])
+        self.assertEqual(rc, 0, out.getvalue())
+        self.assertIn("- mcp-python-sdk：2.0.0rc1 和清冊目標 1.30.0 排不出先後", out.getvalue())  # snapshot target
+
     def test_cli(self):
         buf = io.StringIO()
         with contextlib.redirect_stderr(buf), self.assertRaises(SystemExit):

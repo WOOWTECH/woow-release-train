@@ -523,10 +523,43 @@ def parse_version(v):
 
 
 def cmp_versions(a, b):
+    """-1/0/1 by the numeric core only (None if either is not a version): a `-…`／`+…` suffix is ignored on
+    purpose — for a pin, `1.104.0-stable` is the same upstream release as `1.104.0`. Choosing a NEW
+    target (wvtbot propose) uses cmp_release, which also orders pre-releases."""
     pa, pb = parse_version(a), parse_version(b)
     if pa is None or pb is None:
         return None
     return (pa > pb) - (pa < pb)
+
+
+_RELEASE_RE = re.compile(r"^v?(\d+(?:\.\d+){0,3})(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$")
+
+
+def release_key(v):
+    """Sort key of a version for choosing a release (SemVer §11), or None when no order can be claimed.
+
+    The numeric core decides first; with an equal core a pre-release (`2.96.2-beta.1`) sorts BELOW its
+    release (`2.96.2`); pre-release fields compare one by one (numbers numerically, and below words),
+    more fields win when the shorter list is a prefix; build metadata (`+…`) is ignored. PEP 440 forms
+    (`2.0.0rc1`, `2.2.0.post1`, `1.0.dev3`) and anything else return None: they cannot be ordered here,
+    and cannot be a manifest target either (validate needs parse_version).
+    """
+    m = _RELEASE_RE.match(str(v).strip()) if v is not None else None
+    if not m:
+        return None
+    core = tuple(int(x) for x in m.group(1).split("."))
+    core += (0,) * (4 - len(core))
+    if m.group(2) is None:
+        return (core, 1, ())
+    return (core, 0, tuple((0, int(x), "") if x.isdigit() else (1, 0, x) for x in m.group(2).split(".")))
+
+
+def cmp_release(a, b):
+    """-1/0/1 by release_key (SemVer §11 precedence); None when either cannot be ordered."""
+    ka, kb = release_key(a), release_key(b)
+    if ka is None or kb is None:
+        return None
+    return (ka > kb) - (ka < kb)
 
 
 def satisfies(version, constraint: str) -> bool:
@@ -973,9 +1006,10 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
                 E("%s.policy.license_ceiling: %s" % (where, exc))
         if mode == "range":
             mv = pol.get("min_version")
+            c = cmp_versions(mv, tv) if isinstance(mv, str) and isinstance(tv, str) else None
             if not isinstance(mv, str) or parse_version(mv) is None:
                 E("%s.policy.min_version required (quoted) for range mode" % where)
-            elif tv and cmp_versions(mv, tv) > 0:
+            elif c is not None and c > 0:  # an unparseable target is reported above (target.version)
                 E("%s.policy.min_version %s is above target %s" % (where, mv, tv))
             if not isinstance(pol.get("max_days_behind"), int):
                 E("%s.policy.max_days_behind (int) required for range mode" % where)
