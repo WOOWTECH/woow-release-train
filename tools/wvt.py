@@ -2276,7 +2276,12 @@ def gitea_call(api, token, method, path, body=None):
 
 
 def sync_issue(call, repo: str, label: str, title: str, body: str, drift: bool, run_url: str = ""):
-    """call(method, path, body) -> json. Returns (action, issue_number)."""
+    """call(method, path, body) -> json. Returns (action, issue_number).
+
+    One tracking issue for good: drift reopens the newest closed one (it carries TRACKING_MARKER) with
+    the new report and a comment — the watchers get notified and the history stays in one place —
+    instead of opening another; a new issue is only made when there has never been one.
+    """
     labels = call("GET", "/repos/%s/labels?limit=50" % repo) or []
     lab = next((x for x in labels if x["name"] == label), None)
     if lab is None:
@@ -2289,6 +2294,14 @@ def sync_issue(call, repo: str, label: str, title: str, body: str, drift: bool, 
         if current:
             call("PATCH", "/repos/%s/issues/%d" % (repo, current["number"]), {"title": title, "body": body})
             return "updated", current["number"]
+        closed = call("GET", "/repos/%s/issues?state=closed&type=issues&labels=%s&limit=50" % (repo, urllib.parse.quote(label))) or []
+        closed = sorted((i for i in closed if TRACKING_MARKER in (i.get("body") or "")), key=lambda i: -i["number"])
+        if closed:
+            num = closed[0]["number"]
+            call("PATCH", "/repos/%s/issues/%d" % (repo, num), {"title": title, "body": body, "state": "open"})
+            call("POST", "/repos/%s/issues/%d/comments" % (repo, num),
+                 {"body": "最新一次 drift 又有落後或無法判讀的項目，重新打開並更新報告。" + (" 執行紀錄：%s" % run_url if run_url else "")})
+            return "reopened", num
         new = call("POST", "/repos/%s/issues" % repo, {"title": title, "body": body, "labels": [lab["id"]]})
         return "created", new["number"]
     if current:
@@ -2315,6 +2328,10 @@ def cmd_issue(args) -> int:
     action, num = sync_issue(lambda mth, p, b=None: gitea_call(api, token, mth, p, b), args.repo, args.label,
                              args.title, body, bool(rep.get("drift")), args.run_url)
     print("tracking issue: %s #%s" % (action, num))
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:  # the run stays green on drift (drift.yml): say in the run itself what it found
+        with open(summary, "a", encoding="utf-8") as fh:
+            fh.write("### 版本漂移：drift=%s\n\n追蹤 issue：%s #%s\n" % (str(bool(rep.get("drift"))).lower(), action, num))
     return 0
 
 

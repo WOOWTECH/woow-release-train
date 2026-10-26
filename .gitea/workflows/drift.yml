@@ -1,16 +1,26 @@
 name: Version drift
 
-# 第 0 期：只報告。每天抓 HA（GitHub 公開 raw）與 PaaS（Gitea API）的現況，和清冊比對，
-# 維護「一張」帶 version-drift label 的追蹤 issue：有落後就建立／更新，沒有就留言後關閉。
-# 本 job 永遠不擋任何流程，也不開 PR、不合併。
+# 每天、以及清冊（或 wvt 本身）推到 main 時，抓 HA（GitHub 公開 raw）與 PaaS（Gitea API）的現況和清冊比對，
+# 維護「一張」帶 version-drift label 的追蹤 issue：有漂移就更新它（關著就重新打開並留言），沒有就留言後關閉。
+# 不開 PR、不合併。
 #
-# 讀取跨 repo（paas-app-bundle-cd 是私人 repo）用 org secret CI_GITEA_TOKEN；
+# drift=true 時「重新打開並更新追蹤 issue」，不讓 job 失敗（2026-10-26 決定）：
+#   - 清冊一合併、各邊還沒跟上本來就是 drift=true（fanout PR 要人審）。push 觸發的 run 若因此變紅，
+#     每個清冊合併 commit 都會掛紅叉，久了大家會忽略紅燈，真正的故障（讀不到來源、清冊壞掉）反而被淹沒。
+#   - 追蹤 issue 才是負責人看的地方：重新打開會通知訂閱者，歷史留在同一張（#4），不會每次另開新的。
+#   - job 失敗只留給工具本身出錯：清冊驗證失敗（wvt drift 回 2）、Gitea API 寫不進 issue。
+#   - 本次結果另外寫進執行摘要（drift=true／false、issue 動作），綠燈不再等於「沒有漂移」的誤會也就沒了。
+#
+# 讀取跨 repo（paas-app-bundle-cd、paas-odoo-ci 是私人 repo）用 org secret CI_GITEA_TOKEN；
 # 寫本 repo 的 issue 用每次執行的 GITEA_TOKEN（permissions: issues: write）。
 # API 走叢集內網（同 paas-odoo-ci 的寫法），GitHub 走公開網址。gitea.server_url 在 runner 裡是內網位址，
 # 所以 issue 裡的執行連結寫死公開網址。
 on:
   schedule:
     - cron: "41 0 * * *"   # 台北 08:41
+  push:
+    branches: [main]
+    paths: [woow-versions.yaml, tools/wvt.py]   # 清冊或比對邏輯一變，issue 立刻跟著現況
   workflow_dispatch: {}
 
 concurrency:
@@ -26,7 +36,7 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v4
-      - name: Collect drift (report-only)
+      - name: Collect drift
         env:
           GITEA_API_URL: http://gitea-http.gitea.svc.cluster.local:3000/api/v1
           GITEA_READ_TOKEN: ${{ secrets.CI_GITEA_TOKEN }}

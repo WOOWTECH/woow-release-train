@@ -147,7 +147,7 @@ python3 -m unittest discover -s tests -v
 | Workflow | 觸發 | 做什麼 |
 |---|---|---|
 | `ci.yml` | push、PR | `wvt validate`＋單元測試。只擋本 repo 的清冊 PR |
-| `drift.yml` | 每天台北 08:41、手動 | 跑 `wvt drift`，維護**一張**帶 `version-drift` label 的 issue：有漂移就建立或更新，沒有就留言後關閉 |
+| `drift.yml` | 每天台北 08:41、清冊或 `tools/wvt.py` 推到 main、手動 | 跑 `wvt drift`，維護**一張**帶 `version-drift` label 的 issue：有漂移就更新（關著就重新打開並留言），沒有就留言後關閉。漂移不讓 job 失敗（理由見 drift.yml 檔頭）；結果寫在執行摘要 |
 | `mirror-github.yml` | push main／tag、每天、手動 | 用 deploy key（repo secret `GH_MIRROR_DEPLOY_KEY`）把 main 和 tag 推到 GitHub |
 | `.github/workflows/wvt-check.yml` | 只在 GitHub（`workflow_call`） | HA repo 呼叫的可重用檢查。Gitea 有 `.gitea/workflows` 就不讀 `.github/workflows`，所以它只在鏡像上被使用 |
 | `bots.yml` | 每天台北 09:11、清冊合併到 main、手動 | 第 2 期機器人 propose／fanout，做什麼照清冊 `bots:`；結果寫在執行摘要 |
