@@ -231,12 +231,13 @@ jobs:
 - **模式在清冊**：`bots.<名稱>` 是 `off`、`dry-run`（只在執行摘要列計畫）或 `open-pr`。改模式也是清冊 PR。
 - **一個產品、一個 repo、一個分支**：`wvt/propose-<產品>`、`wvt/fanout-<產品>`。重跑只更新同一張 PR；內容沒變就不推；那一邊對齊後，機器人關掉自己的 PR。
 - **被關掉的提案不重開**：版本負責人關掉（不合併）的同一個提案不會再開。要重提，手動執行 `bots.yml` 並填 `product`、`version`。
-- **安全邊界**：不提超過授權上限的版本；某一邊釘的 digest 跟上游查到的不同就不提案（往前那一邊同一個 repo 裡的產物雜湊也算，例如 uv.lock 的 sdist hash、Dockerfile 的 tarball sha256；相同時寫進 `verified`）；PyPI 已撤回（yanked）、npm 已棄用（deprecated）的版本不提案；`target.identity` 裡機器人查不到的值（commit、build id）只在計畫註明，由人改清冊；禁止降版的產品不往下提；鏡像核可單被拒或逾時不自動重送。
+- **安全邊界**：不提超過授權上限的版本；某一邊釘的 digest 跟上游查到的不同就不提案（往前那一邊同一個 repo 裡的產物雜湊也算，例如 uv.lock 的 sdist hash、Dockerfile 的 tarball sha256；相同時寫進 `verified`）；PyPI／npm 一律先查 registry：不存在、PyPI 已撤回（yanked）、npm 已棄用（deprecated）的版本不提案；`target.identity` 裡機器人查不到的值（commit、build id）只在計畫註明，由人改清冊；比目前目標低的版本不提，除非明確帶 `--allow-downgrade`（`bots.yml` 的 `allow_downgrade=true`，PR 標「降版」）；禁止降版（`downgrade: forbidden`）的產品帶了也不提；鏡像核可單被拒或逾時不自動重送。
 - **PR 只是起點**：機器人只改清冊知道的釘點。文件、測試、遷移說明由各 repo 的 CI 與審核者補齊；資料遷移單向的產品（n8n）PR 內文要求附升級證據。
 
 ```sh
 GITEA_READ_TOKEN=… python3 tools/wvtbot.py --mode dry-run          # 本機看三個機器人的計畫
 python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode dry-run   # 先改清冊的手動升版
+python3 tools/wvtbot.py --bot propose --product mcp-n8n --version 2.96.2 --allow-downgrade --mode dry-run   # 刻意降版
 ```
 
 第 2 期用到的清冊欄位：
@@ -245,7 +246,7 @@ python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode
 |---|---|
 | `upstream.image_tag` | 版本對應的映像 tag，預設 `{version}`（Hermes 用 `v{version}`） |
 | `upstream.artifact_sha256.<名稱>` | 非映像產物（例如 EMQX tarball）的 `.sha256` 網址，含 `{version}` |
-| `upstream.package` | `pypi:<名稱>`／`npm:<名稱>`：propose 到套件 registry 查新版。PyPI 一律查 `https://pypi.org/pypi/<名稱>/<版本>/json`（撤回的不提案），`target.artifacts` 的 `sdist`（.tar.gz）、`wheel`（唯一的 wheel）取 `urls[].digests.sha256`。npm 只在 `target.identity` 有 `integrity`／`shasum` 時查 `https://registry.npmjs.org/<名稱>/<版本>` 的 `dist.*`（npm 不提供 sha256，所以不放 `artifacts`；棄用的不提案）。`verified` 寫實際來源，例如 `pypi odoo-mcp 1.3.0（sdist sha256 取自 PyPI JSON）`、`npm n8n-mcp 2.96.2`；有映像才寫 `registry <image>:<tag>` |
+| `upstream.package` | `pypi:<名稱>`／`npm:<名稱>`：propose 到套件 registry 查新版。PyPI 一律查 `https://pypi.org/pypi/<名稱>/<版本>/json`（撤回的不提案），`target.artifacts` 的 `sdist`（.tar.gz）、`wheel`（唯一的 wheel）取 `urls[].digests.sha256`。npm 一律查 `https://registry.npmjs.org/<名稱>/<版本>`（不存在、棄用、回的不是這一版都不提案）；`target.identity` 有 `integrity`／`shasum` 時再取 `dist.*`（npm 不提供 sha256，所以不放 `artifacts`）。`verified` 寫實際來源，例如 `pypi odoo-mcp 1.3.0（sdist sha256 取自 PyPI JSON）`、`npm n8n-mcp 2.96.2（npm registry 確認已發佈、未棄用）`；有映像才寫 `registry <image>:<tag>` |
 | `package_version[].bump` | fanout 時包裝版號怎麼變：`same`＝等於上游版本、`patch`＝+0.0.1、`none`（預設）＝不動 |
 | `legs.<邊>.fanout.changelog` | 要加一行的 CHANGELOG；`changelog_entry`／`changelog_shared` 改寫那一行的文字 |
 | `legs.paas.mirror` | `{dest_name, digest}`：PaaS 釘的是 JCR 鏡像時，fanout 先 dispatch mirror-image |

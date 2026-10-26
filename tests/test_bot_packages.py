@@ -166,6 +166,33 @@ class NpmTest(unittest.TestCase):
         self.assertEqual(str(cm.exception), "npm request@2.88.2 已棄用（deprecated：request has been deprecated, "
                                             "see https://github.com/request/request/issues/3142），不提案")
 
+    def test_unknown_version_is_refused_without_identity(self):
+        # what L3-4c ran on 10-26: `propose --product mcp-n8n --version 9.9.9` planned 2.96.2 → 9.9.9 unchecked
+        with self.assertRaises(wvt.WvtError) as cm:
+            target("mcp-n8n", "9.9.9", Registries())
+        self.assertIn("npm n8n-mcp@9.9.9 不存在", str(cm.exception))
+        m = manifest()
+        plan = wvtbot.plan_propose(m, wvt.collect_drift(m, FakeFetcher(), TODAY), FakeFetcher(), Oci(), TODAY,
+                                   only="mcp-n8n", force_version="9.9.9", get=Registries())[0]
+        self.assertIsNone(plan["target"])
+        self.assertEqual(len(plan["notes"]), 1)
+        self.assertTrue(plan["notes"][0].startswith("查不到 9.9.9 的上游身分：npm n8n-mcp@9.9.9 不存在"), plan["notes"])
+
+    def test_deprecated_is_refused_without_identity(self):
+        def request(p):
+            p["upstream"] = {"package": "npm:request"}
+            p["target"] = {"version": "2.88.0", "since": "2026-10-01"}
+        with self.assertRaises(wvt.WvtError) as cm:
+            target("mcp-n8n", "2.88.2", Registries(), edit=request)
+        self.assertIn("npm request@2.88.2 已棄用", str(cm.exception))
+
+    def test_registry_answer_must_be_that_version(self):
+        # a dist-tag (`latest`) or a registry answering for another version is not a version to pin
+        reg = Registries({"https://registry.npmjs.org/n8n-mcp/2.96.2": lambda d: dict(d, version="2.99.1")})
+        with self.assertRaises(wvt.WvtError) as cm:
+            target("mcp-n8n", "2.96.2", reg)
+        self.assertIn("registry 回的是 2.99.1", str(cm.exception))
+
     def test_no_sha256_artifacts_and_scoped_names(self):
         def artifact(p):
             p["target"]["artifacts"] = {"tarball": "sha256:" + "0" * 64}
@@ -181,6 +208,77 @@ class NpmTest(unittest.TestCase):
         self.assertEqual(urls, ["https://registry.npmjs.org/@modelcontextprotocol%2Fsdk/1.32.2"])
 
 
+class DowngradeTest(unittest.TestCase):
+    """A version below the current target is refused unless asked for with --allow-downgrade (L3 10-26:
+    `--version 2.2.0` for mcp-python-sdk 2.3.0 and `--version 1.2.3` for mcp-odoo 1.3.0 were proposed silently)."""
+
+    def plan(self, product, version, target_version, allow=False, edit=None):
+        m = manifest()
+        m["products"][product]["target"]["version"] = target_version
+        if edit:
+            edit(m["products"][product])
+        reg = Registries()
+        rep = wvt.collect_drift(m, FakeFetcher(), TODAY)
+        plans = wvtbot.plan_propose(m, rep, FakeFetcher(), Oci(), TODAY, only=product, force_version=version, get=reg,
+                                    allow_downgrade=allow)
+        return m, plans[0], reg
+
+    def test_npm_downgrade_needs_the_flag(self):
+        _, plan, reg = self.plan("mcp-n8n", "2.96.2", "2.99.1")
+        self.assertIsNone(plan["target"])
+        self.assertFalse(plan["downgrade"])
+        self.assertEqual(plan["notes"], ["2.96.2 低於清冊目標 2.99.1：降版要明確帶 --allow-downgrade（bots.yml 的 allow_downgrade=true），不提案"])
+        self.assertEqual(reg.urls, [])  # refused before any registry call
+
+    def test_npm_downgrade_with_the_flag_is_verified_and_marked(self):
+        m, plan, reg = self.plan("mcp-n8n", "2.96.2", "2.99.1", allow=True)
+        self.assertEqual((plan["version"], plan["downgrade"]), ("2.96.2", True))
+        self.assertEqual(plan["target"]["verified"], "2026-10-24 wvt propose：npm n8n-mcp 2.96.2（npm registry 確認已發佈、未棄用）")
+        self.assertEqual(reg.urls, ["https://registry.npmjs.org/n8n-mcp/2.96.2"])
+        title, body = wvtbot.render_propose(m, plan, "abc1234")
+        self.assertIn("清冊目標 2.99.1 → 2.96.2（降版）", title)
+        self.assertIn("⚠️ **降版**", body)
+
+    def test_pypi_downgrade(self):
+        _, plan, _ = self.plan("mcp-python-sdk", "2.3.0", "2.4.0")
+        self.assertIsNone(plan["target"])
+        self.assertIn("降版要明確帶 --allow-downgrade", plan["notes"][0])
+        _, plan, reg = self.plan("mcp-python-sdk", "2.3.0", "2.4.0", allow=True)
+        self.assertEqual((plan["version"], plan["downgrade"]), ("2.3.0", True))
+        self.assertEqual(reg.urls, [MCP_JSON])
+
+    def test_the_flag_never_beats_a_forbidden_downgrade(self):
+        def forbid(p):
+            p["policy"]["downgrade"] = "forbidden"
+        _, plan, _ = self.plan("mcp-n8n", "2.96.2", "2.99.1", allow=True, edit=forbid)
+        self.assertIsNone(plan["target"])
+        self.assertEqual(plan["notes"], ["2.96.2 低於清冊 2.99.1，而此產品禁止降版，不提案"])
+
+    def test_upgrades_need_no_flag(self):
+        _, plan, _ = self.plan("mcp-n8n", "2.96.2", "2.92.1")
+        self.assertEqual((plan["version"], plan["downgrade"]), ("2.96.2", False))
+
+    def test_cli(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf), self.assertRaises(SystemExit):
+            wvtbot.main(["--manifest", MANIFEST_PATH, "--bot", "propose", "--mode", "dry-run", "--allow-downgrade"])
+        self.assertIn("--allow-downgrade needs --product and --version", buf.getvalue())
+        orig_f, orig_r = wvtbot.BotFetcher, wvtbot.Registry
+
+        class F(FakeFetcher):
+            def __init__(self, *a, **k):
+                super().__init__()
+        wvtbot.BotFetcher, wvtbot.Registry = F, Oci
+        self.addCleanup(setattr, wvtbot, "BotFetcher", orig_f)
+        self.addCleanup(setattr, wvtbot, "Registry", orig_r)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):  # 2.91.0 < snapshot target 2.92.1: refused before any registry call
+            rc = wvtbot.main(["--manifest", MANIFEST_PATH, "--today", "2026-10-24", "--mode", "dry-run", "--bot", "propose",
+                              "--product", "mcp-n8n", "--version", "2.91.0"])
+        self.assertEqual(rc, 0, out.getvalue())
+        self.assertIn("- mcp-n8n：2.91.0 低於清冊目標 2.92.1：降版要明確帶 --allow-downgrade", out.getvalue())
+
+
 class VerifiedSourceTest(unittest.TestCase):
     """`verified` names what was looked up; it read `registry None:<version>` for packages (PR #16, #20)."""
 
@@ -190,11 +288,13 @@ class VerifiedSourceTest(unittest.TestCase):
         self.assertEqual(t["verified"], "2026-10-24 wvt propose：pypi mcp 2.3.0（PyPI JSON 確認已發佈、未撤回）")
         self.assertEqual(reg.urls, [MCP_JSON])
 
-    def test_npm_without_integrity_is_named_not_fetched(self):
+    def test_npm_without_integrity_still_checks_the_release(self):
+        # 10-26 (L3-4c): with no identity recorded, propose never asked npm, so a mistyped version
+        # became a manifest PR. The registry is always asked now; there is just nothing to copy.
         reg = Registries()
         t = target("mcp-n8n", "2.96.2", reg)
-        self.assertEqual(t["verified"], "2026-10-24 wvt propose：npm n8n-mcp 2.96.2")
-        self.assertEqual(reg.urls, [])
+        self.assertEqual(t["verified"], "2026-10-24 wvt propose：npm n8n-mcp 2.96.2（npm registry 確認已發佈、未棄用）")
+        self.assertEqual(reg.urls, ["https://registry.npmjs.org/n8n-mcp/2.96.2"])
         self.assertEqual(set(t), {"version", "since", "verified"})
 
     def test_image(self):

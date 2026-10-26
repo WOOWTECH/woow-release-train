@@ -29,6 +29,9 @@ on:
       version:
         description: "propose：把 product 提到這個上游版本（先改清冊的手動升版）"
         default: ""
+      allow_downgrade:
+        description: "propose：version 比清冊目標低時，填 true 才會提（降版；禁止降版的產品照樣不提）"
+        default: "false"
 
 concurrency:
   group: wvt-bots
@@ -58,4 +61,8 @@ jobs:
           BOT: ${{ inputs.bot || 'all' }}
           PRODUCT: ${{ inputs.product }}
           VERSION: ${{ inputs.version }}
-        run: python3 tools/wvtbot.py --bot "${BOT}" --product "${PRODUCT}" --version "${VERSION}"
+          ALLOW_DOWNGRADE: ${{ inputs.allow_downgrade }}
+        run: |
+          set -- --bot "${BOT}" --product "${PRODUCT}" --version "${VERSION}"
+          if [ "${ALLOW_DOWNGRADE}" = "true" ]; then set -- "$@" --allow-downgrade; fi
+          python3 tools/wvtbot.py "$@"

@@ -247,9 +247,10 @@ def npm_release(name: str, version: str, get=None) -> dict:
 def package_fields(pkg, version: str, artifacts: list, identity: list, get=None) -> tuple:
     """({artifact: sha256}, {identity: value}, source text) of a package release, from its registry.
 
-    PyPI is always asked: the release must exist and not be yanked, and the `artifacts` the target
-    records (sdist, wheel) come from the JSON digests. npm is asked only when the target records an
-    `identity` integrity / shasum (dist.*); it publishes no sha256, so an npm artifact is refused.
+    Both registries are always asked: the release must exist and not be yanked (PyPI) or deprecated
+    (npm) — a mistyped manual version must never become a manifest PR. The `artifacts` a PyPI target
+    records (sdist, wheel) come from the JSON digests; an npm target's `identity` integrity / shasum
+    from dist.* (npm publishes no sha256, so an npm artifact is refused).
     """
     eco, name = pkg
     if eco == "pypi":
@@ -261,9 +262,12 @@ def package_fields(pkg, version: str, artifacts: list, identity: list, get=None)
         if artifacts:
             raise WvtError("artifacts.%s：npm registry 只有 dist.integrity（sha512）與 dist.shasum（sha1），沒有 sha256；"
                            "請改記在 target.identity.integrity／shasum" % artifacts[0])
+        doc = npm_release(name, version, get)
+        if str(doc.get("version") or version) != version:
+            raise WvtError("npm %s@%s：registry 回的是 %s，不是這一版" % (name, version, doc.get("version")))
         if not identity:
-            return {}, {}, "npm %s %s" % (name, version)
-        dist = npm_release(name, version, get).get("dist") or {}
+            return {}, {}, "npm %s %s（npm registry 確認已發佈、未棄用）" % (name, version)
+        dist = doc.get("dist") or {}
         missing = [k for k in identity if not dist.get(k)]
         if missing:
             raise WvtError("npm %s@%s 的 dist 沒有 %s" % (name, version, "、".join(missing)))
@@ -922,14 +926,20 @@ def new_target_for(p: dict, version: str, today, registry: Registry, get=None) -
     return new
 
 
-def plan_propose(m: dict, rep: dict, f, registry: Registry, today, only=None, force_version=None, get=None):
-    """[{product, version, target, shared, reasons, notes}] for products to bump in the manifest."""
+def plan_propose(m: dict, rep: dict, f, registry: Registry, today, only=None, force_version=None, get=None,
+                 allow_downgrade=False):
+    """[{product, version, target, shared, reasons, notes, downgrade}] for products to bump in the manifest.
+
+    A version below the current target is only proposed with allow_downgrade (--allow-downgrade), and
+    never for a product whose policy forbids downgrades.
+    """
     plans = []
     for pname, p in m["products"].items():
         if only and pname != only:
             continue
         tv = p["target"]["version"]
-        plan = {"product": pname, "old_version": tv, "version": None, "target": None, "shared": [], "reasons": [], "notes": []}
+        plan = {"product": pname, "old_version": tv, "version": None, "target": None, "shared": [], "reasons": [], "notes": [],
+                "downgrade": False}
         ahead = [r for r in rep["rows"] if r["product"] == pname and r.get("source") == "branch"
                  and r["compare"] not in ("info", "shared_files") and any(x["status"] == "ahead" for x in r["findings"])
                  and wvt.parse_version(r.get("version")) and wvt.cmp_versions(r["version"], tv) > 0]
@@ -942,11 +952,16 @@ def plan_propose(m: dict, rep: dict, f, registry: Registry, today, only=None, fo
             plan["reasons"] = ["手動指定（workflow_dispatch）：%s" % version]
         if version and version != tv:
             ceiling = (p.get("policy") or {}).get("license_ceiling")
+            lower = (wvt.cmp_versions(version, tv) or 0) < 0
             if ceiling and not wvt.satisfies(version, ceiling):
                 plan["notes"].append("%s 超過授權上限 %s，不提案" % (version, ceiling))
-            elif wvt.cmp_versions(version, tv) < 0 and (p.get("policy") or {}).get("downgrade") == "forbidden":
+            elif lower and (p.get("policy") or {}).get("downgrade") == "forbidden":
                 plan["notes"].append("%s 低於清冊 %s，而此產品禁止降版，不提案" % (version, tv))
+            elif lower and not allow_downgrade:
+                plan["notes"].append("%s 低於清冊目標 %s：降版要明確帶 --allow-downgrade（bots.yml 的 allow_downgrade=true），不提案"
+                                     % (version, tv))
             else:
+                plan["downgrade"] = lower
                 try:
                     plan["target"] = new_target_for(p, version, today, registry, get)
                     plan["version"] = version
@@ -1033,7 +1048,7 @@ def render_propose(m: dict, plan: dict, manifest_rev: str | None) -> tuple:
     name = p.get("display_name") or plan["product"]
     parts = []
     if plan["target"]:
-        parts.append("清冊目標 %s → %s" % (plan["old_version"], plan["version"]))
+        parts.append("清冊目標 %s → %s%s" % (plan["old_version"], plan["version"], "（降版）" if plan.get("downgrade") else ""))
     for s in plan["shared"]:
         parts.append("共用檔 %s → %s" % (s["old_commit"][:7], s["commit"][:7]))
     title = GITEA_TITLE_PREFIX + "release train：%s %s" % (name, "、".join(parts))
@@ -1047,6 +1062,9 @@ def render_propose(m: dict, plan: dict, manifest_rev: str | None) -> tuple:
         t = plan["target"]
         b += ["### %s 清冊目標 %s → %s" % (name, plan["old_version"], plan["version"]), ""]
         b += ["- 為什麼：" + "；".join(plan["reasons"])]
+        if plan.get("downgrade"):
+            b.append("- ⚠️ **降版**：%s 低於目前目標 %s，是明確帶 `--allow-downgrade`（bots.yml `allow_downgrade=true`）才提的；"
+                     "合併前確認兩邊都要退回這一版。" % (plan["version"], plan["old_version"]))
         b += ["- 上游身分：%s" % ((t.get("verified") or "").partition("wvt propose：")[2] or "—")]
         if t.get("index_digest"):
             b.append("  - index `%s`" % t["index_digest"])
@@ -1484,7 +1502,8 @@ def _git_url(env, repo_full):
 
 def do_propose(m, rep, f, today, mode, args, env, rev):
     out = ["### propose（%s）" % mode]
-    plans = plan_propose(m, rep, f, Registry(), today, args.product or None, args.version or None)
+    plans = plan_propose(m, rep, f, Registry(), today, args.product or None, args.version or None,
+                         allow_downgrade=getattr(args, "allow_downgrade", False))
     repo = env.get("WVT_MANIFEST_REPO", "woow-paas/woow-release-train")
     if mode == "open-pr":
         live = {pl["product"] for pl in plans if pl["target"] or pl["shared"]}
@@ -1641,10 +1660,14 @@ def main(argv=None) -> int:
     ap.add_argument("--mode", choices=BOT_MODES, help="override the manifest's bot modes (e.g. dry-run locally)")
     ap.add_argument("--product", default="")
     ap.add_argument("--version", default="", help="propose: put this upstream version up for the product (manual upgrade)")
+    ap.add_argument("--allow-downgrade", action="store_true",
+                    help="propose: --version may be below the current target (refused otherwise)")
     ap.add_argument("--plan", help="also write the report here")
     args = ap.parse_args(argv)
     if args.version and not args.product:
         ap.error("--version needs --product")
+    if args.allow_downgrade and not args.version:
+        ap.error("--allow-downgrade needs --product and --version")
     try:
         return run(args)
     except WvtError as exc:
