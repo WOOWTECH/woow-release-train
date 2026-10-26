@@ -96,6 +96,20 @@ class SyncIssueTest(unittest.TestCase):
         g = FakeGitea(issues=[{"number": 3, "state": "closed", "body": "someone else's issue with the label"}])
         self.assertEqual(wvt.sync_issue(g, REPO, "version-drift", "t", BODY, True), ("created", 2))
 
+    def test_an_open_issue_without_the_marker_is_never_touched(self):
+        # review 07-issue-sync-nonmarker-probe: an OPEN label issue without the marker (#7, someone's note)
+        # used to become the tracking issue (title／body replaced on drift, overwritten and closed when clean)
+        theirs = {"number": 7, "state": "open", "title": "human: 請追 n8n 升版", "body": "someone else's notes (no marker)"}
+        for drift, want in ((True, ("reopened", 4)), (False, ("noop", None))):
+            g = FakeGitea(issues=[{"number": 4, "state": "closed", "body": wvt.TRACKING_MARKER + " old report"}, dict(theirs)])
+            self.assertEqual(wvt.sync_issue(g, REPO, "version-drift", "t", BODY, drift, "https://run/1"), want, drift)
+            self.assertEqual(next(i for i in g.issues if i["number"] == 7), theirs, drift)
+            self.assertFalse(any("/issues/7" in c[1] for c in g.calls if c[0] != "GET"), (drift, g.calls))
+            self.assertEqual(next(i for i in g.issues if i["number"] == 4)["state"], "open" if drift else "closed")
+        g = FakeGitea(issues=[dict(theirs)])  # no tracking issue ever: drift opens one next to it
+        self.assertEqual(wvt.sync_issue(g, REPO, "version-drift", "t", BODY, True), ("created", 2))
+        self.assertEqual(g.issues[0], theirs)
+
     def test_an_open_issue_is_updated_not_reopened(self):
         g = FakeGitea(issues=[{"number": 4, "state": "open", "body": wvt.TRACKING_MARKER}, {"number": 1, "state": "closed",
                                                                                            "body": wvt.TRACKING_MARKER}])

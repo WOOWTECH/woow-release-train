@@ -2291,6 +2291,9 @@ def sync_issue(call, repo: str, label: str, title: str, body: str, drift: bool, 
     One tracking issue for good: drift reopens the newest closed one (it carries TRACKING_MARKER) with
     the new report and a comment — the watchers get notified and the history stays in one place —
     instead of opening another; a new issue is only made when there has never been one.
+
+    Only an issue whose body carries TRACKING_MARKER is the tracking issue. Another issue with the same
+    label (someone's own note, open or closed) is never edited, closed or reopened.
     """
     labels = call("GET", "/repos/%s/labels?limit=50" % repo) or []
     lab = next((x for x in labels if x["name"] == label), None)
@@ -2298,7 +2301,7 @@ def sync_issue(call, repo: str, label: str, title: str, body: str, drift: bool, 
         lab = call("POST", "/repos/%s/labels" % repo,
                    {"name": label, "color": "#e99695", "description": "woow release train：版本漂移追蹤（自動）"})
     issues = call("GET", "/repos/%s/issues?state=open&type=issues&labels=%s&limit=50" % (repo, urllib.parse.quote(label))) or []
-    mine = [i for i in issues if TRACKING_MARKER in (i.get("body") or "")] or issues
+    mine = [i for i in issues if TRACKING_MARKER in (i.get("body") or "")]
     current = mine[0] if mine else None
     if drift:
         if current:

@@ -2,6 +2,7 @@ name: Version drift
 
 # 每天、以及清冊（或 wvt 本身）推到 main 時，抓 HA（GitHub 公開 raw）與 PaaS（Gitea API）的現況和清冊比對，
 # 維護「一張」帶 version-drift label 的追蹤 issue：有漂移就更新它（關著就重新打開並留言），沒有就留言後關閉。
+# 追蹤 issue 只認內文有 <!-- wvt:drift-tracking --> 標記的那張；同 label 但沒有標記的 issue 一律不碰。
 # 不開 PR、不合併。
 #
 # drift=true 時「重新打開並更新追蹤 issue」，不讓 job 失敗（2026-10-26 決定）：
