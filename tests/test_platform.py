@@ -172,6 +172,93 @@ class PlatformDriftTest(unittest.TestCase):
         self.assertEqual(rep["context"]["prod_platform"], "v18.0.1.0.242")
         self.assertIn("- staging 平台版：**未知**（建置紀錄（build-image.yml 核可單）沒有 woow-paas-docker-local/paas-odoo-official-stg:20261016.0331）",
                       wvt.render_markdown(self.m, rep))
+        st = {r["status"] for r in rows(rep, "woow-mcp-server", source="stg")}
+        self.assertEqual(st, {"unknown"})
+
+
+class McpImageLegTest(unittest.TestCase):
+    def setUp(self):
+        self.m = manifest()
+
+    def collect(self, **kw):
+        return wvt.collect_drift(self.m, FakeFetcher(**kw), TODAY)
+
+    def test_eight_templates_three_points_aligned(self):
+        f = FakeFetcher()
+        rep = wvt.collect_drift(self.m, f, TODAY)
+        rs = rows(rep, "woow-mcp-server")
+        self.assertEqual(len(rs), 24)
+        self.assertEqual({r["source"] for r in rs}, {"prod", "stg", "branch"})
+        self.assertEqual(sorted({r["pin"] for r in rs}), sorted(["hermes", "odoo", "n8n", "k8s", "vk", "opendesign", "litellm", "nextcloud"]))
+        self.assertTrue(all(r["status"] == "ok" and r["version"] == "2026.10.25.0927" for r in rs), [(r["point"], r["status"]) for r in rs])
+        self.assertTrue(any("（staging v18.0.1.0.243）" in r["point"] for r in rs))
+        self.assertIn("| woow-mcp-server | lockstep | 2026.10.25.0927 | —（沒有這一邊） | ✅ 一致 2026.10.25.0927 | ✅ 一致 |",
+                      wvt.render_markdown(self.m, rep))
+        # aligned rows never ask Gitea for the commit order (the shared-files row asks about charts only)
+        self.assertFalse(any(c[0] == "compare" and c[1] == MCP_SERVER for c in f.calls))
+
+    def test_prod_seed_on_a_known_older_commit_is_behind(self):
+        # platform .258 pinned all eight to 4d90de3 (before all-on); this used to be an info row (✅)
+        old = seed_with("cloud_app_mcp_odoo", OLD_4D9)
+        rep = self.collect(overrides={(PLATFORM, SEED, "v18.0.1.0.242"): old})
+        r = next(x for x in rows(rep, "woow-mcp-server", "odoo", "prod"))
+        self.assertEqual((r["status"], r["version"]), ("behind", "2026.10.24.1009"))
+        self.assertIn("identity.commit：4d90de3bd26e（清冊記為 2026.10.24.1009）≠ 清冊目標 fc5fa02e3ff4（2026.10.25.0927）",
+                      r["findings"][0]["message"])
+        self.assertEqual({x["status"] for x in rows(rep, "woow-mcp-server", "odoo", "branch")}, {"ok"})
+        self.assertTrue(rep["drift"])
+        md = wvt.render_markdown(self.m, rep)
+        self.assertIn("| woow-mcp-server | lockstep | 2026.10.25.0927 | —（沒有這一邊） | 🟠 落後 2026.10.24.1009 / 2026.10.25.0927 | 🟠 落後 |", md)
+
+    def test_unlisted_commits_are_placed_by_git_history(self):
+        cases = {"behind": (0, None), "ahead": (3, 0), "diverged": (3, 2), "unknown": (None, None)}
+        for name, (fwd, back) in cases.items():
+            other = {"behind": "b" * 40, "ahead": "a" * 40, "diverged": "d" * 40, "unknown": "e" * 40}[name]
+            compares = {(MCP_SERVER, FC5, other): fwd}
+            if back is not None:
+                compares[(MCP_SERVER, other, FC5)] = back
+            rep = self.collect(overrides={(PLATFORM, SEED, "develop"): seed_with("cloud_app_mcp_k8s", other)}, compares=compares)
+            r = next(x for x in rows(rep, "woow-mcp-server", "k8s", "branch"))
+            want = {"behind": "behind", "ahead": "ahead", "diverged": "mismatch", "unknown": "mismatch"}[name]
+            self.assertEqual(r["status"], want, (name, r["findings"]))
+            msg = r["findings"][0]["message"]
+            self.assertIn({"behind": "是清冊目標 fc5fa02e3ff4 之前的 commit（WOOWTECH/woow-mcp-server）",
+                           "ahead": "是清冊目標 fc5fa02e3ff4 之後的 commit（WOOWTECH/woow-mcp-server）：清冊 target 要跟上",
+                           "diverged": "和清冊目標 fc5fa02e3ff4 分岔",
+                           "unknown": "不是 WOOWTECH/woow-mcp-server 裡的 commit"}[name], msg)
+
+    def test_right_tag_wrong_digest(self):
+        swapped = seed_with("cloud_app_mcp_vk", FC5, "sha256:" + "9" * 64)
+        rep = self.collect(overrides={(PLATFORM, SEED, "develop"): swapped})
+        r = next(x for x in rows(rep, "woow-mcp-server", "vk", "branch"))
+        self.assertEqual(r["status"], "mismatch")
+        self.assertEqual(r["findings"][0]["rule"], "digest")
+        self.assertIn("tag 是清冊目標 fc5fa02e3ff4，但 digest 999999999999 ≠ 清冊 artifacts.vk-mcp-admin 0c7227cf00c0", r["findings"][0]["message"])
+
+    def test_offline_check_on_a_platform_pr(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        repo = os.path.join(tmp, "p")
+        shutil.copytree(os.path.join(FIX, "paas_platform"), repo)
+        path = os.path.join(repo, SEED)
+
+        def check(seed_text):
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(seed_text)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = wvt.main(["--manifest", MANIFEST_PATH, "--today", "2026-10-26", "check", "--leg", "paas", "--repo-dir", repo,
+                               "--repo", PLATFORM, "--product", "woow-mcp-server"])
+            return rc, buf.getvalue()
+        rc, out = check(fixture("paas_platform", "src", "data", "cloud_app_templates.xml"))
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.count("✅ 一致"), 8, out)
+        rc, out = check(seed_with("cloud_app_mcp_hermes", OLD_4D9))
+        self.assertEqual(rc, 0)  # no hard rules: a warning
+        self.assertIn("🟠 落後", out)
+        rc, out = check(seed_with("cloud_app_mcp_hermes", "c" * 40))  # offline: no history to ask
+        self.assertEqual(rc, 0)
+        self.assertIn("identity.commit：cccccccccccc ≠ 清冊 fc5fa02e3ff4", out)
 
 
 class GiteaRefTest(unittest.TestCase):
@@ -215,6 +302,21 @@ class SourcesManifestTest(unittest.TestCase):
         errs = self.errors(m)
         self.assertTrue(any("sources.prod_platform.kind must be one of cd_image" in e for e in errs), errs)
         self.assertTrue(any("sources.stg_platform.builds needs" in e for e in errs), errs)
+
+    def test_identity_pin_keys(self):
+        m = manifest()
+        pins = m["products"]["woow-mcp-server"]["legs"]["paas"]["pins"]
+        pins[0]["also_refs"] = ["$nope"]
+        pins[1]["digest"] = "artifacts.missing"
+        pins[2]["history"] = "github:WOOWTECH/woow-mcp-server"
+        version_pin = m["products"]["mcp-n8n"]["legs"]["paas"]["pins"][0]   # a version compare: no digest key
+        version_pin["digest"] = "artifacts.sdist"
+        m["products"]["woow-mcp-server"]["known_versions"].append({"version": "2026.1.1", "identity": {"commit": FC5}})
+        errs = self.errors(m)
+        for needle in ("pins[hermes]: ref $nope refers to an unknown source", "pins[odoo]: digest must name a target digest",
+                       "pins[n8n]: history must be gitea:OWNER/REPO", "mcp-n8n.legs.paas.pins[%s]: digest must name" % version_pin["id"],
+                       "known_versions[2026.1.1].identity.commit duplicates the target"):
+            self.assertTrue(any(needle in e for e in errs), (needle, errs))
 
     def test_json_manifest_round_trip(self):
         tmp = tempfile.mkdtemp()

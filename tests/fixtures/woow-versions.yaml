@@ -1,5 +1,5 @@
 # 測試用的凍結快照（2026-10-24 main 5cb9f40 的 woow-versions.yaml），和 tests/fixtures 的檔案配套。
-# 2026-10-26 只跟著格式改：sources 改 kind cd_image（＋stg_platform）。
+# 2026-10-26 只跟著格式改：sources 改 kind cd_image（＋stg_platform）、加 woow-mcp-server、拿掉 MCP 的 seed-wrapper。
 # 不要跟著線上清冊更新：機器人會改線上清冊，測試要固定的輸入。線上清冊只做格式驗證（test_manifest）。
 # woow-versions.yaml — HA ↔ PaaS 版本清冊（唯一真相來源）
 #
@@ -590,15 +590,6 @@ products:
           - {id: image-arg, label: Dockerfile N8N_MCP_VERSION, file: apps/n8n/Dockerfile, kind: dockerfile_arg, name: N8N_MCP_VERSION, compare: version}
           - {id: patch-guard-result, label: isError patch 的版本守線, file: apps/n8n/n8n_mcp_admin/upstream_result_patch.py, kind: regex, pattern: '^VERSION = "([^"]+)"', compare: version}
           - {id: patch-guard-direct, label: direct inputs patch 的版本守線, file: apps/n8n/n8n_mcp_admin/upstream_direct_patch.py, kind: regex, pattern: '^VERSION = "([^"]+)"', compare: version}
-          - id: seed-wrapper
-            label: seed 映像（tag＝woow-mcp-server commit，非上游身分）
-            repo: "gitea:odoo-addons/woow_paas_platform"
-            ref: $prod_platform
-            also_refs: [develop]
-            file: src/data/cloud_app_templates.xml
-            kind: seed_image
-            record: cloud_app_mcp_n8n
-            compare: info
     exceptions: []
     # 建議例外（負責人核准後再解除註解）：
     #   - {leg: ha, what: "n8n-mcp 2.91.0→2.92.1", reason: "HA patch digest（fix_test_run_error_messages.py PINNED／PATCHED）與 tool_snapshot 需對 2.92.1 重審", approved_by: "<負責人>", expires: "2026-11-07", waives: [behind]}
@@ -635,15 +626,6 @@ products:
           - {id: pyproject, label: apps/odoo/pyproject.toml 相依, file: apps/odoo/pyproject.toml, kind: pep508, package: odoo-mcp, compare: version}
           - {id: uv-lock, label: 根 uv.lock 鎖定, file: uv.lock, kind: uv_lock, package: odoo-mcp, compare: version}
           - {id: uv-lock-sdist, label: 根 uv.lock sdist hash, file: uv.lock, kind: uv_lock, package: odoo-mcp, field: sdist_sha256, parse: digest, compare: artifacts.sdist}
-          - id: seed-wrapper
-            label: seed 映像（tag＝woow-mcp-server commit，非上游身分）
-            repo: "gitea:odoo-addons/woow_paas_platform"
-            ref: $prod_platform
-            also_refs: [develop]
-            file: src/data/cloud_app_templates.xml
-            kind: seed_image
-            record: cloud_app_mcp_odoo
-            compare: info
     exceptions: []
     notes:
       - "上游身分一致（odoo-mcp 1.1.0）。patch 組合不同屬包裝差異：HA 2 支（cross_session_token_store、direct_writes），PaaS 3 支（另有 fix_remove_3step_tools）加 4 個執行期修補（upstream_fixes、result_limits、tool_errors、concurrency）。"
@@ -678,15 +660,6 @@ products:
           - {id: source-commit, label: vendor 來源 commit（README 首段，短 sha）, file: apps/litellm/README.md, kind: regex, pattern: 'Woow_litellm_mcp_server` main `([0-9a-f]{7,40})`', match: prefix, compare: identity.source_commit}
           - {id: package-version, label: 套件 __version__, file: apps/litellm/woow_litellm_mcp_server/__init__.py, kind: regex, pattern: '^__version__ = "([^"]+)"', compare: version}
           - {id: server-py, label: server.py 內容 sha256, file: apps/litellm/woow_litellm_mcp_server/server.py, kind: file_sha256, parse: digest, compare: artifacts.server_py}
-          - id: seed-wrapper
-            label: seed 映像（tag＝woow-mcp-server commit，非上游身分）
-            repo: "gitea:odoo-addons/woow_paas_platform"
-            ref: $prod_platform
-            also_refs: [develop]
-            file: src/data/cloud_app_templates.xml
-            kind: seed_image
-            record: cloud_app_mcp_litellm
-            compare: info
     exceptions: []
     notes:
       - "包裝差異（不比較）：HA 另改 lifespan.py（scoped DNS-pinned HTTPX）；fastmcp HA 3.4.5、PaaS 3.4.8。"
@@ -718,15 +691,6 @@ products:
         ref: main
         pins:
           - {id: server-py, label: server.py 內容 sha256, file: apps/hermes/hermes_mcp_server/server.py, kind: file_sha256, parse: digest, compare: artifacts.server_py}
-          - id: seed-wrapper
-            label: seed 映像（tag＝woow-mcp-server commit，非上游身分）
-            repo: "gitea:odoo-addons/woow_paas_platform"
-            ref: $prod_platform
-            also_refs: [develop]
-            file: src/data/cloud_app_templates.xml
-            kind: seed_image
-            record: cloud_app_mcp_hermes
-            compare: info
     exceptions: []
     notes:
       - "HA 快照落後 8 個 hermes commit（10-17／18 的安全與功能修補）；HA PR #6／#7／#8／#12 與 woow-mcp-server 分支 feat/mcp-parity-20261023 進行中，合併後 HA 會多 errors.py、guards.py，runtime-sources.json 的 source 格式也會變（woow-mcp-server:<sha>+<branch>）。"
@@ -781,15 +745,6 @@ products:
         pins:
           - {id: source-commit, label: vendor 來源 commit（VENDORED.md）, file: apps/nextcloud/VENDORED.md, kind: regex, pattern: '^- commit：`([0-9a-f]{40})`', compare: identity.source_commit}
           - {id: package-version, label: 套件 __version__, file: apps/nextcloud/nextcloud_mcp_server/__init__.py, kind: regex, pattern: '^__version__ = "([^"]+)"', compare: version}
-          - id: seed-wrapper
-            label: seed 映像（tag＝woow-mcp-server commit，非上游身分）
-            repo: "gitea:odoo-addons/woow_paas_platform"
-            ref: $prod_platform
-            also_refs: [develop]
-            file: src/data/cloud_app_templates.xml
-            kind: seed_image
-            record: cloud_app_mcp_nextcloud
-            compare: info
     exceptions: []
     notes:
       - "PaaS 落後一個 patch（0.1.4，fe1fbb2d）：apps/nextcloud/scripts/sync_vendor.sh 重新 vendor 即可（VENDORED.md 更新方式）。HA 另改 4 個檔（client／server／errors／webdav，runtime-sources.json 記載），屬包裝差異。"
@@ -824,6 +779,53 @@ products:
     exceptions: []
     notes:
       - "n8n child 另有 npm @modelcontextprotocol/sdk：HA overrides 1.31.0、PaaS 隨 n8n-mcp 的 1.30.0（GHSA-6qxp-vccf-f47h，HA 判斷 OAuth client 部分該 child 不用），未納入。"
+
+  # ============================================================== PaaS MCP 映像
+  # 平台 8 個 MCP 範本（seed cloud_app_mcp_*）的映像都是 woow-mcp-server main 同一個 commit 的 CI 建置：
+  # tag＝那個 commit（40 碼），digest＝那次建置。上面各 MCP 產品比的是原始碼裡的上游版本；這裡比的是平台範本
+  # 實際會部署哪一次建置——正式站、staging 讀 CD 釘的平台版的 seed，develop 讀分支。
+  # tag 不是目標 commit：清冊記得的舊 commit 依版號判落後；沒記的由 drift 問 Gitea 先後（之前＝🟠、之後＝🔵）。
+  # tag 對了還要 digest 對（target.artifacts）。cloud_app_mcp_odoo_manage 不在內：odoo-manage 已移出
+  # uv workspace（woow-mcp-server #82），映像停在 d5032a72，不隨 main 重建。
+  woow-mcp-server:
+    display_name: PaaS MCP 映像（woow-mcp-server commit）
+    upstream: {source: "gitea:WOOWTECH/woow-mcp-server"}
+    policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
+    target:
+      version: "2026.10.25.0927"    # 無語意化版號：main commit 的 UTC 日期．時分（fc5fa02＝#84 預設全開＋既有服務一次性遷移）
+      since: "2026-10-25"
+      identity: {commit: "fc5fa02e3ff48225a1a2bdc5dfc74269a57a1b6f"}
+      artifacts:                    # jcr-prod.woowtech.io/woow-paas-docker-local/<名稱>:<commit> 的 digest
+        hermes-mcp-admin: "sha256:7020b3ad4a36c0c68beb0652f4e5a748231c1954db7f687d1d945847539fed37"
+        odoo-mcp-admin: "sha256:45eb8812195d757fee126b9159e7cfa81a035862709c33de4a5fb211ec4c55b8"
+        n8n-mcp-admin: "sha256:1591fb4e17417dea4df16342e6383fa22d3dae09c2e61e144d666de41b1b4232"
+        k8s-mcp-admin: "sha256:8f678ffb3456bd225a427a35c980bb912c35fb91833cd278726b5d29148017ca"
+        vk-mcp-admin: "sha256:0c7227cf00c0d0afa6509e11495fa96026009b82997509a82c6242070a74b892"
+        opendesign-mcp-admin: "sha256:52096266dad05ba9db48005f36421585c9fc7e2a8264d228e58ef722c44ee974"
+        litellm-mcp-admin: "sha256:4d6eb9c2e67a34d75824b58a9c08941f6a48853a6a2d6bba69b6638331ac438f"
+        nextcloud-mcp-admin: "sha256:4f9bf95bb94d6d0d8430a3ec9ad822e6b76d47ec85837ab3f60059302a1be5e1"
+      verified: "2026-10-26：woow-mcp-server main＝fc5fa02（2026-10-25T09:27:44Z）；8 個 tag@digest 與平台 seed v18.0.1.0.261、.263、.265、.266、develop 逐字相同（平台 #1995 依 main CI run 27630 的 push 輸出改釘）"
+    known_versions:
+      - {version: "2026.10.24.1055", identity: {commit: "6b91398b8377a119fe9ef3f99bad49fd6443ad42"}}   # #82 SDK 2、全開前（平台 .259、.260）
+      - {version: "2026.10.24.1009", identity: {commit: "4d90de3bd26e959045973e022457331514a85330"}}   # #79 16 MiB 上限、SDK 1（平台 .258）
+    legs:
+      paas:
+        fanout: {enabled: false, reason: "改釘 8 個範本要用 woow-mcp-server CI 建出的 tag@digest，再發平台版；機器人不改"}
+        repo: "gitea:odoo-addons/woow_paas_platform"
+        ref: $prod_platform
+        pins:
+          - {id: hermes, label: seed MCP 映像 hermes-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_hermes, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.hermes-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
+          - {id: odoo, label: seed MCP 映像 odoo-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_odoo, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.odoo-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
+          - {id: n8n, label: seed MCP 映像 n8n-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_n8n, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.n8n-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
+          - {id: k8s, label: seed MCP 映像 k8s-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_k8s, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.k8s-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
+          - {id: vk, label: seed MCP 映像 vk-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_vk, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.vk-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
+          - {id: opendesign, label: seed MCP 映像 opendesign-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_opendesign, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.opendesign-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
+          - {id: litellm, label: seed MCP 映像 litellm-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_litellm, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.litellm-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
+          - {id: nextcloud, label: seed MCP 映像 nextcloud-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_nextcloud, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.nextcloud-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
+    exceptions: []
+    notes:
+      - "fc5fa02＝MCP 預設全開＋既有服務一次性遷移（woow-mcp-server #84）；平台 .261 起 8 個範本都釘它。這裡只看範本：既有租戶服務要換映像才會跑遷移（10-25 換了 26 個），drift 不讀租戶實際跑的映像。"
+      - "woow-mcp-server main 往前走（新 PR 合併、CI 建出新 tag）時：先開清冊 PR 把 target 換成新 commit＋8 個 digest、舊的移到 known_versions，再改平台 seed、發版。"
 
 # 線上實際部署的手動快照（非真相來源，只供 drift 報告參考；第 1 期起改由 operator 回報）。
 # 本 repo 有公開鏡像：只寫數量與版本，不寫租戶的服務 ID／工作區名稱。

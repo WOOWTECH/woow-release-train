@@ -88,15 +88,17 @@ def approval_issues():
 class FakeFetcher(wvt.Fetcher):
     """Serves fixtures instead of the network. overrides: {(repo, path, ref): text|None|Exception}.
 
-    issues: the paas-odoo-ci issues an issue search sees (default: the recorded approval issues)."""
+    issues: the paas-odoo-ci issues an issue search sees (default: the recorded approval issues);
+    compares: {(repo, base, head): commits head has and base lacks | None (unknown commit)}."""
 
-    def __init__(self, overrides=None, unreachable=(), blobs=None, behind=7, issues=None):
+    def __init__(self, overrides=None, unreachable=(), blobs=None, behind=7, issues=None, compares=None):
         super().__init__()
         self.overrides = overrides or {}
         self.unreachable = set(unreachable)
         self.blobs = LITELLM_MAIN_BLOBS if blobs is None else blobs
         self.behind = behind
         self.issues = approval_issues() if issues is None else issues
+        self.compares = compares or {}
         self.calls = []
 
     def read(self, repo, path, ref):
@@ -127,6 +129,9 @@ class FakeFetcher(wvt.Fetcher):
         return dict(self.blobs)
 
     def commits_between(self, repo, base, head):
+        self.calls.append(("compare", repo, base, head))
+        if (repo, base, head) in self.compares:
+            return self.compares[(repo, base, head)]
         return self.behind
 
     def search_issues(self, repo, query):

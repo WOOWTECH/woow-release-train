@@ -101,7 +101,9 @@ probes: { api.github.com: https://api.github.com/rate_limit }   # 只測連線�
 - `parse`：`version`（預設）、`image_ref`（`repo:tag@sha256:…`）或 `digest`（純 sha256）。
 - `compare`：`version`、`index_digest`、`platforms.<arch>`、`artifacts.<名稱>`、`identity.<名稱>`（`target.identity` 裡的 commit、build id、fork 的上游版本），或 `info`（只列參考，不比較）。
 - `match: prefix`：identity 允許短 sha（至少 7 碼）；`tag_as_version: true`：seed 映像的 tag 就是版本（例如 OpenDesign 外殼 tag＝core build id）。
-- `ref`：分支或 tag。`$prod_platform`／`$stg_platform` 代表正式站／staging 實際部署的平台版（見下面 `drift` 的資料來源）；`also_refs: [develop]` 會同時比 develop。
+- `digest: artifacts.<名稱>`（identity 釘點用）：tag 等於目標時，digest 也必須是 `target` 記的那次建置，否則「不符」。例如 PaaS MCP 映像 tag＝woow-mcp-server commit、digest＝那次 CI 建置。
+- `history: "gitea:OWNER/REPO"`（identity 釘點用）：commit 不是目標、`known_versions` 也沒記（`known_versions[].identity`）時，`drift` 問 Gitea 先後——目標之前的 commit＝落後 🟠、之後＝領先 🔵（清冊要跟上）、分岔或不存在＝不符 🔴。離線的 `check` 不問，一律「不符」。
+- `ref`：分支或 tag。`$prod_platform`／`$stg_platform` 代表正式站／staging 實際部署的平台版（見下面 `drift` 的資料來源）；`also_refs: [$stg_platform, develop]` 會同時比這些點。
 
 **只比上游身分。** add-on 版號、chart 版號、JCR 時間戳 tag 都是各邊自己的包裝，只放在 `package_version` 列參考。例如 HA EMQX 的 add-on 標 5.9.1，實際包的是上游 5.8.9；授權上限 `<5.9.0` 只看 5.8.9。
 
@@ -133,9 +135,10 @@ python3 -m unittest discover -s tests -v
 `drift` 的資料來源：
 
 - **HA**：GitHub 公開 raw；讀不到時改用 api.github.com。另外讀 Store `catalog.json`，並在 catalog 記錄的 `source_sha` 上重讀釘點，這就是「已發佈」的版本。
-- **PaaS**：Gitea API。seed 比正式站實際部署的平台 tag 與 develop；charts 和 paas-odoo-ci 比 main。
+- **PaaS**：Gitea API。seed 比正式站實際部署的平台 tag 與 develop（PaaS MCP 映像另比 staging）；charts 和 paas-odoo-ci 比 main。
 - **平台版從哪來**：`sources.<名稱>`（kind `cd_image`）讀 CD values 的 `image.repository`＋`image.tag`，再到 `builds` 的 paas-odoo-ci 建置核可單（作者 `gitea-actions`、標題 `[prod-approval:build-image.yml] Build <repository>:<tag>`）取 `approval-context` 的 `ADDON_REF`。核可後的建置就是用這組值 clone 平台、再驗 image 內 addon 版號＝clone 版號，所以它就是那顆 image 的平台版。找不到、互相矛盾、不是 `v18.x` tag → 報告寫「**未知**」，`$<名稱>` 的列標 ❔（讀不到檔或核可單是 ⚠️）、drift＝true，不退回檔頭的發版註記；註記只用來交叉比對，和建置紀錄不同時寫在備註。
 - **Gitea 的 ref 先確認存在**：Gitea 的 raw API 遇到不存在的 tag／分支會回預設分支的內容（HTTP 200），所以讀檔前先用 commits API 確認 ref 存在；不存在就當「檔案不存在」。
+- **PaaS MCP 映像**（產品 `woow-mcp-server`）：8 個 MCP 範本（`cloud_app_mcp_*`）的 image tag 比清冊的 woow-mcp-server 目標 commit、digest 比目標那次建置；正式站、staging、develop 三個點都比。
 - **共用檔**：比對 HA lock 記錄的 git blob 和 charts main 的 blob。
 - **連線狀況**：每個端點的連線結果會列在報告最後。
 

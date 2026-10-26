@@ -988,6 +988,11 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
                     E("%s.%s.version must be a quoted version" % (where, label))
                 if tv and kv.get("version") == tv:
                     E("%s.%s duplicates the target version" % (where, label))
+                for iname, iv in (kv.get("identity") or {}).items():
+                    if not isinstance(iv, str) or not iv:
+                        E("%s.%s.identity.%s must be a non-empty quoted string" % (where, label, iname))
+                    elif iv == (tgt.get("identity") or {}).get(iname):
+                        E("%s.%s.identity.%s duplicates the target" % (where, label, iname))
             ds = [kv.get("index_digest")] + list((kv.get("platforms") or {}).values()) + list((kv.get("artifacts") or {}).values())
             for d in ds:
                 if d is None:
@@ -1034,6 +1039,15 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
                 for ref in [pin.get("ref")] + list(pin.get("also_refs") or []):
                     if isinstance(ref, str) and ref.startswith("$") and ref[1:] not in srcs:
                         E("%s: ref %s refers to an unknown source" % (pw, ref))
+                dk = pin.get("digest")  # an identity pin (e.g. a seed tag = commit) whose digest must be that build
+                if dk is not None and not (str(cmp_).startswith("identity.") and re.match(
+                        r"^(index_digest|(platforms|artifacts)\.[A-Za-z0-9_.-]+)$", str(dk)) and target_value(p, str(dk))):
+                    E("%s: digest must name a target digest (index_digest, platforms.<arch>, artifacts.<name>) "
+                      "and goes with an identity compare" % pw)
+                hist = pin.get("history")  # the repo whose history orders an identity commit (behind / ahead)
+                if hist is not None and not (str(cmp_).startswith("identity.") and str(hist).startswith("gitea:")
+                                             and REPO_RE.match(str(hist))):
+                    E("%s: history must be gitea:OWNER/REPO and goes with an identity compare" % pw)
             pkgs = legs[leg].get("package_version") or []
             for pkg in ([pkgs] if isinstance(pkgs, dict) else pkgs):
                 kw = "%s.legs.%s.package_version[%s]" % (where, leg, pkg.get("label"))
@@ -1170,8 +1184,53 @@ def active_exceptions(product: dict, leg: str, today: _dt.date, pin_id: str | No
     return out
 
 
-def evaluate(product: dict, leg: str, pin: dict, obs: dict, today: _dt.date | None = None) -> dict:
-    """Compare one observation with the manifest. Returns {status, version, findings}."""
+def _same_identity(want: str, got: str, pin: dict) -> bool:
+    if not want or not got:
+        return False
+    return want.startswith(got) if pin.get("match") == "prefix" and len(got) >= 7 else got == want
+
+
+def _identity_findings(product: dict, pin: dict, compare: str, want: str, got: str, order=None):
+    """(version, findings) for an identity that is not the target: a known_versions entry with the same
+    identity gives its version (behind / ahead by version); otherwise `order(history, want, got)` (online:
+    drift) places a commit before / after the target; without it the difference is a mismatch."""
+    name = compare.split(".", 1)[1]
+    tv = (product.get("target") or {}).get("version")
+    for kv in product.get("known_versions") or []:
+        known = str((kv.get("identity") or {}).get(name) or "")
+        if _same_identity(known, got, pin):
+            c = cmp_versions(kv.get("version"), tv)
+            st = "behind" if c is not None and c < 0 else "ahead" if c is not None and c > 0 else "mismatch"
+            return kv.get("version"), [finding(st, "identity", "%s：%s（清冊記為 %s）≠ 清冊目標 %s（%s）"
+                                               % (compare, _id(got), kv.get("version"), _id(want), tv))]
+    c = cmp_versions(got, want)
+    st = "behind" if c is not None and c < 0 else "ahead" if c is not None and c > 0 else "mismatch"
+    msg = "%s：%s ≠ 清冊 %s" % (compare, _id(got), _id(want))
+    hist = pin.get("history")
+    if st == "mismatch" and hist and order is not None:
+        where = hist.split(":", 1)[1]
+        try:
+            rel = order(hist, want, got)
+        except WvtError as exc:
+            msg += "（無法向 %s 確認先後：%s）" % (where, exc)
+        else:
+            if rel == "behind":
+                st, msg = "behind", "%s：%s 是清冊目標 %s 之前的 commit（%s）" % (compare, _id(got), _id(want), where)
+            elif rel == "ahead":
+                st, msg = "ahead", "%s：%s 是清冊目標 %s 之後的 commit（%s）：清冊 target 要跟上" % (compare, _id(got), _id(want), where)
+            elif rel == "diverged":
+                msg = "%s：%s 和清冊目標 %s 分岔，不在 %s 的同一條歷史上" % (compare, _id(got), _id(want), where)
+            else:
+                msg = "%s：%s 不是 %s 裡的 commit（清冊目標 %s）" % (compare, _id(got), where, _id(want))
+    return None, [finding(st, "identity", msg)]
+
+
+def evaluate(product: dict, leg: str, pin: dict, obs: dict, today: _dt.date | None = None, order=None) -> dict:
+    """Compare one observation with the manifest. Returns {status, version, findings}.
+
+    order(history repo, target commit, other commit) -> behind | ahead | diverged | None places an identity
+    commit in a repo's history; only ``drift`` (online) passes it, for pins that name a `history`.
+    """
     today = today or _dt.datetime.now(TAIPEI).date()
     pol = product.get("policy") or {}
     mode = pol.get("mode")
@@ -1193,11 +1252,22 @@ def evaluate(product: dict, leg: str, pin: dict, obs: dict, today: _dt.date | No
         if got is None:
             return {"status": "unknown", "version": version,
                     "findings": [finding("unknown", "extract", "釘點沒有值，無法比對 %s" % compare)]}
-        same = want.startswith(got) if pin.get("match") == "prefix" and len(got) >= 7 else got == want
-        if not same:
-            c = cmp_versions(got, want)
-            st = "behind" if c is not None and c < 0 else "ahead" if c is not None and c > 0 else "mismatch"
-            findings.append(finding(st, "identity", "%s：%s ≠ 清冊 %s" % (compare, _id(got), _id(want))))
+        if _same_identity(want, got, pin):
+            if version is None:  # e.g. a seed image whose tag is the target commit
+                version = tv
+            dkey = pin.get("digest")
+            if dkey:  # the tag names the target build; the digest must be that build's too
+                wd, gd = target_value(product, dkey), obs.get("digest")
+                if gd is None:
+                    findings.append(finding("unknown", "digest", "tag 是清冊目標 %s，但釘點沒有 digest，無法確認是那次建置（清冊 %s %s）"
+                                            % (_id(got), dkey, short(wd))))
+                elif gd != wd:
+                    findings.append(finding("mismatch", "digest", "tag 是清冊目標 %s，但 digest %s ≠ 清冊 %s %s"
+                                            % (_id(got), short(gd), dkey, short(wd))))
+        else:
+            kv_version, fs = _identity_findings(product, pin, compare, want, got, order)
+            version = version if kv_version is None else kv_version
+            findings.extend(fs)
     else:
         if compare != "version":
             want = target_value(product, compare)
@@ -1674,10 +1744,23 @@ class Fetcher:
         return {x["name"]: x["sha"] for x in data if x.get("type") == "file"}
 
     def commits_between(self, repo: str, base: str, head: str):
+        """Commits head has and base lacks (Gitea compare base...head); None when either is unknown."""
         host, full = repo.split(":", 1)
         data = self.gitea_json("/repos/%s/compare/%s...%s" % (full, base, head))
         return None if data is None else data.get("total_commits")
 
+    def commit_order(self, repo: str, target: str, other: str):
+        """Where `other` sits against `target` in repo's history: behind (an ancestor), ahead (a descendant),
+        diverged, or None when the repo does not know one of them."""
+        n = self.commits_between(repo, target, other)
+        if n is None:
+            return None
+        if n == 0:
+            return "behind"
+        back = self.commits_between(repo, other, target)
+        if back is None:
+            return None
+        return "ahead" if back == 0 else "diverged"
 
     def search_issues(self, repo: str, query: str):
         """Issues and closed issues of a Gitea repo matching a search string (the build approval records)."""
@@ -1937,7 +2020,7 @@ def _observe_remote(m, p, leg, pin, ref, f, today, row):
         row.update(status="unknown", version=None, observed=None,
                    findings=[finding("unknown", "extract", "解析失敗：%s" % exc)])
         return row
-    res = evaluate(p, leg, pin, obs, today)
+    res = evaluate(p, leg, pin, obs, today, order=f.commit_order)
     row.update(status=res["status"], version=res["version"], observed=obs, findings=res["findings"])
     return row
 

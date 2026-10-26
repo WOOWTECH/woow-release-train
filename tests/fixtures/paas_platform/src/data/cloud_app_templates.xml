@@ -95,5 +95,87 @@
             <field name="is_hidden" eval="False"/>
             <field name="is_active" eval="True"/>
         </record>
+        <!-- MCP 範本（v18.0.1.0.261 seed 節錄：helm_default_values 只留 image） -->
+        <record id="cloud_app_mcp_hermes" model="woow_paas_platform.cloud_app_template">
+            <field name="name">Hermes MCP Server</field>
+            <field name="slug">mcp-hermes</field>
+            <field name="helm_chart_name">oci://jcr-prod.woowtech.io/woow-paas-docker-local/mcp-server</field>
+            <field name="helm_chart_version">0.1.9</field>
+            <field name="helm_default_values">{"image": {"repository": "jcr-prod.woowtech.io/woow-paas-docker-local/hermes-mcp-admin",
+                "tag": "fc5fa02e3ff48225a1a2bdc5dfc74269a57a1b6f@sha256:7020b3ad4a36c0c68beb0652f4e5a748231c1954db7f687d1d945847539fed37"}}</field>
+            <field name="is_active" eval="True" />
+        </record>
+        <record id="cloud_app_mcp_odoo" model="woow_paas_platform.cloud_app_template">
+            <field name="name">Odoo MCP Server</field>
+            <field name="slug">mcp-odoo</field>
+            <field name="helm_chart_name">oci://jcr-prod.woowtech.io/woow-paas-docker-local/mcp-server</field>
+            <field name="helm_chart_version">0.1.9</field>
+            <field name="helm_default_values">{"image": {"repository": "jcr-prod.woowtech.io/woow-paas-docker-local/odoo-mcp-admin",
+                "tag": "fc5fa02e3ff48225a1a2bdc5dfc74269a57a1b6f@sha256:45eb8812195d757fee126b9159e7cfa81a035862709c33de4a5fb211ec4c55b8"}}</field>
+            <field name="is_active" eval="True" />
+        </record>
+        <record id="cloud_app_mcp_odoo_manage" model="woow_paas_platform.cloud_app_template">
+            <field name="name">Odoo Manage MCP</field>
+            <field name="slug">mcp-odoo-manage</field>
+            <field name="helm_chart_name">oci://jcr-prod.woowtech.io/woow-paas-docker-local/mcp-server</field>
+            <field name="helm_chart_version">0.1.5</field>
+            <field name="helm_default_values">{"image": {"repository": "jcr-prod.woowtech.io/woow-paas-docker-local/odoo-manage-mcp-admin",
+                "tag": "d5032a72f8d8c48b00b474a5193bd2c26ac5613c@sha256:daefcdcbaecc442a0c64bf2eab9d786fa26948a326c915d2db924fe606db3f82"}}</field>
+            <field name="is_active" eval="True" />
+        </record>
+        <record id="cloud_app_mcp_n8n" model="woow_paas_platform.cloud_app_template">
+            <field name="name">n8n MCP Server</field>
+            <field name="slug">mcp-n8n</field>
+            <field name="helm_chart_name">oci://jcr-prod.woowtech.io/woow-paas-docker-local/mcp-server</field>
+            <field name="helm_chart_version">0.1.9</field>
+            <field name="helm_default_values">{"image": {"repository": "jcr-prod.woowtech.io/woow-paas-docker-local/n8n-mcp-admin",
+                "tag": "fc5fa02e3ff48225a1a2bdc5dfc74269a57a1b6f@sha256:1591fb4e17417dea4df16342e6383fa22d3dae09c2e61e144d666de41b1b4232"}}</field>
+            <field name="is_active" eval="True" />
+        </record>
+        <record id="cloud_app_mcp_k8s" model="woow_paas_platform.cloud_app_template">
+            <field name="name">Kubernetes MCP</field>
+            <field name="slug">mcp-k8s</field>
+            <field name="helm_chart_name">oci://jcr-prod.woowtech.io/woow-paas-docker-local/mcp-server</field>
+            <field name="helm_chart_version">0.1.9</field>
+            <field name="helm_default_values">{"image": {"repository": "jcr-prod.woowtech.io/woow-paas-docker-local/k8s-mcp-admin",
+                "tag": "fc5fa02e3ff48225a1a2bdc5dfc74269a57a1b6f@sha256:8f678ffb3456bd225a427a35c980bb912c35fb91833cd278726b5d29148017ca"}}</field>
+            <field name="is_active" eval="True" />
+        </record>
+        <record id="cloud_app_mcp_vk" model="woow_paas_platform.cloud_app_template">
+            <field name="name">Vibe Kanban MCP</field>
+            <field name="slug">mcp-vk</field>
+            <field name="helm_chart_name">oci://jcr-prod.woowtech.io/woow-paas-docker-local/mcp-server</field>
+            <field name="helm_chart_version">0.1.9</field>
+            <field name="helm_default_values">{"image": {"repository": "jcr-prod.woowtech.io/woow-paas-docker-local/vk-mcp-admin",
+                "tag": "fc5fa02e3ff48225a1a2bdc5dfc74269a57a1b6f@sha256:0c7227cf00c0d0afa6509e11495fa96026009b82997509a82c6242070a74b892"}}</field>
+            <field name="is_active" eval="True" />
+        </record>
+        <record id="cloud_app_mcp_opendesign" model="woow_paas_platform.cloud_app_template">
+            <field name="name">Open Design MCP</field>
+            <field name="slug">mcp-opendesign</field>
+            <field name="helm_chart_name">oci://jcr-prod.woowtech.io/woow-paas-docker-local/mcp-server</field>
+            <field name="helm_chart_version">0.1.9</field>
+            <field name="helm_default_values">{"image": {"repository": "jcr-prod.woowtech.io/woow-paas-docker-local/opendesign-mcp-admin",
+                "tag": "fc5fa02e3ff48225a1a2bdc5dfc74269a57a1b6f@sha256:52096266dad05ba9db48005f36421585c9fc7e2a8264d228e58ef722c44ee974"}}</field>
+            <field name="is_active" eval="True" />
+        </record>
+        <record id="cloud_app_mcp_litellm" model="woow_paas_platform.cloud_app_template">
+            <field name="name">MCP：AI 模型閘道（LiteLLM）</field>
+            <field name="slug">mcp-litellm</field>
+            <field name="helm_chart_name">oci://jcr-prod.woowtech.io/woow-paas-docker-local/mcp-server</field>
+            <field name="helm_chart_version">0.1.9</field>
+            <field name="helm_default_values">{"image": {"repository": "jcr-prod.woowtech.io/woow-paas-docker-local/litellm-mcp-admin",
+                "tag": "fc5fa02e3ff48225a1a2bdc5dfc74269a57a1b6f@sha256:4d6eb9c2e67a34d75824b58a9c08941f6a48853a6a2d6bba69b6638331ac438f"}}</field>
+            <field name="is_active" eval="True" />
+        </record>
+        <record id="cloud_app_mcp_nextcloud" model="woow_paas_platform.cloud_app_template">
+            <field name="name">MCP：Nextcloud</field>
+            <field name="slug">mcp-nextcloud</field>
+            <field name="helm_chart_name">oci://jcr-prod.woowtech.io/woow-paas-docker-local/mcp-server</field>
+            <field name="helm_chart_version">0.1.9</field>
+            <field name="helm_default_values">{"image": {"repository": "jcr-prod.woowtech.io/woow-paas-docker-local/nextcloud-mcp-admin",
+                "tag": "fc5fa02e3ff48225a1a2bdc5dfc74269a57a1b6f@sha256:4f9bf95bb94d6d0d8430a3ec9ad822e6b76d47ec85837ab3f60059302a1be5e1"}}</field>
+            <field name="is_active" eval="True" />
+        </record>
     </data>
 </odoo>
