@@ -179,7 +179,7 @@ class PlatformDriftTest(unittest.TestCase):
 
     def test_staging_qa_build_is_info_not_drift(self):
         # staging normally runs addon-only builds (build-paas-official-staging.yml → paas-odoo-official-stg, no
-        # build record): all 7 staging releases 10-23..26 were such builds (fix-woow-release-train/raw/01).
+        # build record): all 7 staging releases 10-23..26 were such builds (CD history of values-stg.yaml, read 10-26).
         # Counted as drift, they would have kept the tracking issue open for the whole QA period.
         rep = self.collect(overrides={(CD, STG_VALUES, "main"): self.staging_qa_build()})
         self.assertIsNone(rep["context"]["stg_platform"])
@@ -305,7 +305,7 @@ SHA_DEV = "ccbb4a053eecdad164726dcc6a185682078859ca"   # develop (seed: fc5fa02)
 
 
 class FakeGiteaApi:
-    """Gitea 1.27 as it answered on 2026-10-26 (fix-woow-release-train/raw/05-gitea-ref-probe.txt):
+    """Gitea 1.27 as it answered read-only probes of git-prod on 2026-10-26:
     commits?sha= resolves a branch, a tag, a full or a SHORT sha to the full sha and 404s a missing ref;
     raw?ref= serves a branch, a tag or a full sha (404 for a missing full sha) and the DEFAULT branch for
     anything else — a missing tag, or a short sha that exists. A repo the token cannot see (`hidden`)
@@ -389,7 +389,7 @@ class GiteaRefTest(unittest.TestCase):
         self.assertEqual(sum("/commits?sha=v18.0.1.0.266" in u for u in api.urls), 1)  # one lookup per repo and ref
 
     def test_a_short_sha_reads_that_commit_not_the_default_branch(self):
-        # review 06-short-sha-probe: read(..., "11b2ed8") passed the old existence check and returned develop
+        # 10-26 review: read(..., "11b2ed8") passed the old existence check and returned develop's seed
         f, api = self.fetcher()
         for ref in (SHA_258[:7], SHA_258[:12]):
             self.assertEqual(f.read(PLATFORM, SEED, ref), "seed at .258", ref)

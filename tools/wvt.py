@@ -1949,7 +1949,9 @@ def platform_word(label: str) -> str:
 
 
 def resolve_platform(f: Fetcher, name: str, src: dict) -> dict:
-    """The platform release a CD values file deploys: the build record of the image it pins.
+    """The platform release a CD values file pins: the build record of the image it pins. This is what
+    the CD (main) asks Fleet to deploy, not proof of what runs: a failed Fleet apply or upgrade gate is
+    not visible here.
 
     Never the release-note comments (a stale note would silently compare the wrong seed): when the
     record cannot tell, `tag` is None and the report says the release is unknown.
@@ -2015,7 +2017,7 @@ def resolve_ref(ref: str, ctx: dict):
 
 
 def _ref_source(ref) -> str:
-    """Row source: branch, or the deployed platform a $source names (prod, stg)."""
+    """Row source: branch, or the platform release the CD pins for a $source (prod, stg)."""
     if isinstance(ref, str) and ref.startswith("$"):
         return ref[1:].replace("_platform", "")
     return "branch"

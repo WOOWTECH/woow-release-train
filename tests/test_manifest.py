@@ -105,7 +105,7 @@ class MutationTest(unittest.TestCase):
         self.assertError(m, "above target")
 
     def test_unparseable_range_target_is_an_error_not_a_crash(self):
-        # review 15b: a propose to mcp-python-sdk 2.0.0rc1 reached validate_manifest, whose min_version check
+        # 10-26 review: a propose to mcp-python-sdk 2.0.0rc1 reached validate_manifest, whose min_version check
         # did `cmp_versions(mv, tv) > 0` with None and the whole bots run died with a TypeError
         m = manifest()
         m["products"]["mcp-python-sdk"]["target"]["version"] = "2.0.0rc1"

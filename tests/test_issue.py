@@ -97,7 +97,7 @@ class SyncIssueTest(unittest.TestCase):
         self.assertEqual(wvt.sync_issue(g, REPO, "version-drift", "t", BODY, True), ("created", 2))
 
     def test_an_open_issue_without_the_marker_is_never_touched(self):
-        # review 07-issue-sync-nonmarker-probe: an OPEN label issue without the marker (#7, someone's note)
+        # 10-26 review: an OPEN label issue without the marker (#7, someone's note)
         # used to become the tracking issue (title／body replaced on drift, overwritten and closed when clean)
         theirs = {"number": 7, "state": "open", "title": "human: 請追 n8n 升版", "body": "someone else's notes (no marker)"}
         for drift, want in ((True, ("reopened", 4)), (False, ("noop", None))):

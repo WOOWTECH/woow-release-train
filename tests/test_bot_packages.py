@@ -259,7 +259,7 @@ class DowngradeTest(unittest.TestCase):
         self.assertEqual((plan["version"], plan["downgrade"]), ("2.96.2", False))
 
     def test_versions_that_cannot_be_ordered_are_refused_first(self):
-        # review 09／15: `--version 2.0.0rc1` (PyPI mcp really has 2.0.0a1…rc1, all below 2.3.0) passed the
+        # 10-26 review: `--version 2.0.0rc1` (PyPI mcp really has 2.0.0a1…rc1, all below 2.3.0) passed the
         # downgrade gate as "not lower" (cmp None → 0), reached PyPI, then crashed validate_manifest
         for version in ("2.0.0rc1", "1.3.0rc1", "2.2.0.post1", "1.0.dev3", "2.4.0rc1", "latest"):
             for allow in (False, True):  # the flag cannot help: neither gate could be applied
@@ -270,7 +270,7 @@ class DowngradeTest(unittest.TestCase):
                 self.assertEqual(reg.urls, [], version)
 
     def test_a_semver_pre_release_is_below_its_release(self):
-        # review 09: 2.96.2-beta.1 compared equal to 2.96.2 (suffix ignored) and became a plain upgrade PR
+        # 10-26 review: 2.96.2-beta.1 compared equal to 2.96.2 (suffix ignored) and became a plain upgrade PR
         _, plan, reg = self.plan("mcp-n8n", "2.96.2-beta.1", "2.96.2")
         self.assertIsNone(plan["target"])
         self.assertEqual(plan["notes"], ["2.96.2-beta.1 低於清冊目標 2.96.2：降版要明確帶 --allow-downgrade（bots.yml 的 "
@@ -315,7 +315,7 @@ class DowngradeTest(unittest.TestCase):
             self.assertEqual(plan["reasons"], ["%s p：2.97.0（f）" % ("PaaS" if order[1] == "2.97.0" else "HA")])
 
     def test_cli_pre_release_does_not_crash_the_run(self):
-        # review 15b: the same dry-run ended in a traceback (exit 1) before
+        # 10-26 review: the same live dry-run ended in a traceback (exit 1) before
         orig_f, orig_r = wvtbot.BotFetcher, wvtbot.Registry
 
         class F(FakeFetcher):

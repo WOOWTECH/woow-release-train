@@ -29,7 +29,8 @@ phase: 1            # 0 只報告 → 1 警告＋硬規則 → 2 機器人開 PR
 enforcement: hard-rules
 
 sources:
-  # 正式站／staging 的 Fleet 實際部署哪個平台版（seed 要讀 woow_paas_platform 的哪個 tag）。
+  # CD（paas-app-bundle-cd main）釘給正式站／staging 的平台版（seed 要讀 woow_paas_platform 的哪個 tag）。
+  # 這是 CD 釘的版本，不是 Fleet 實際套用的結果：正式站實際跑的版號要另外唯讀驗（README 已知限制）。
   # kind cd_image：讀 CD values 的 image（repository＋tag），再到 builds 的建置核可單
   # （作者 gitea-actions、標題「[prod-approval:<workflow>] Build <repository>:<tag>」）取 approval-context 的
   # ADDON_REF——核可後的建置就是用這組值 clone 平台、並驗 image 內的 addon 版號＝clone 版號。
