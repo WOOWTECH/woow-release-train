@@ -1,10 +1,18 @@
-"""Shared test helpers: import wvt from tools/, fixture paths, a fake fetcher."""
+"""Shared test helpers: import wvt from tools/, fixture paths, a fake fetcher, and no network.
+
+Every test module imports this one, so importing it also cuts the test process off the network: a
+connection to anything but loopback raises NetworkBlocked. The tests are recordings and fakes; a real
+request would make them depend on the runner's egress (10-26 review: collect_drift's api.github.com probe
+opened 44 real connections per run — each could wait out the 20 s Fetcher timeout where egress is dropped).
+"""
 
 import copy
 import json
 import os
 import shutil
+import socket
 import sys
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -12,6 +20,50 @@ FIX = os.path.join(HERE, "fixtures")
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 import wvt  # noqa: E402
+
+
+class NetworkBlocked(BaseException):
+    """A test tried to reach the network. A BaseException on purpose: wvt turns `Exception`s from urllib
+    into WvtError and the connectivity probes swallow those, which would hide the attempt — this one
+    makes the test error out instead."""
+
+
+def _loopback(host) -> bool:
+    return host in (None, "", "localhost", "::1") or str(host).startswith("127.")
+
+
+def _block_network():
+    real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
+    real_create, real_getaddrinfo = socket.create_connection, socket.getaddrinfo
+
+    def check(what, address):
+        if isinstance(address, (str, bytes)):  # an AF_UNIX path
+            return
+        host = address[0] if isinstance(address, tuple) and address else address
+        if not _loopback(host):
+            raise NetworkBlocked("tests must not use the network: %s %r" % (what, address))
+
+    def connect(self, address):
+        check("connect", address)
+        return real_connect(self, address)
+
+    def connect_ex(self, address):
+        check("connect_ex", address)
+        return real_connect_ex(self, address)
+
+    def create_connection(address, *a, **kw):
+        check("create_connection", address)
+        return real_create(address, *a, **kw)
+
+    def getaddrinfo(host, *a, **kw):
+        check("getaddrinfo", (host,))
+        return real_getaddrinfo(host, *a, **kw)
+
+    socket.socket.connect, socket.socket.connect_ex = connect, connect_ex
+    socket.create_connection, socket.getaddrinfo = create_connection, getaddrinfo
+
+
+_block_network()
 
 # Behaviour tests read a frozen snapshot that matches the fixtures; the bots rewrite the live
 # manifest, which is only checked for being valid (test_manifest.LiveManifestTest).
@@ -122,6 +174,18 @@ class FakeFetcher(wvt.Fetcher):
             return None
         with open(full, encoding="utf-8") as fh:
             return fh.read()
+
+    def _get(self, url, headers=None, endpoint=None):
+        """Nothing the fake does not serve goes out: whatever reaches the HTTP layer (the manifest's
+        connectivity probes, api.github.com) answers like a 404 — reachable, nothing there — or fails as
+        simulated when its host is in `unreachable` ("github" covers every GitHub endpoint)."""
+        self.calls.append(("get", url))
+        ep = endpoint or urllib.parse.urlsplit(url).netloc
+        if ep in self.unreachable or ("github" if "github" in ep else "gitea") in self.unreachable:
+            self._probe(ep, "URLError: simulated")
+            raise wvt.WvtError("%s unreachable: simulated" % ep)
+        self._probe(ep)
+        return None
 
     def blob_shas(self, repo, path, ref):
         if "gitea" in self.unreachable:

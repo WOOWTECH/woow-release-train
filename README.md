@@ -260,7 +260,7 @@ python3 tools/wvtbot.py --bot propose --product mcp-n8n --version 2.96.2 --allow
 2. 決定 `policy.mode`。range 必須寫 `min_version`、`max_days_behind`、`target.since`。
 3. 為 `ha`、`paas` 各列出釘點（`pins`），包裝版號放 `package_version`；HA 有上架 Store 的加 `published`。
 4. 如果某邊目前停在舊 digest，把該版加進 `known_versions`，報告才能換算出版本。
-5. 本機跑 `python3 tools/wvt.py validate`、`python3 -m unittest discover -s tests`，以及 `drift`（需要 Gitea 權杖，放環境變數 `GITEA_READ_TOKEN`）。單元測試讀的是凍結快照 `tests/fixtures/woow-versions.yaml`（和 fixtures 配套），線上清冊只驗格式；機器人改線上清冊不會讓測試壞掉。新產品要測讀法時，把它加進快照與 fixtures。
+5. 本機跑 `python3 tools/wvt.py validate`、`python3 -m unittest discover -s tests`，以及 `drift`（需要 Gitea 權杖，放環境變數 `GITEA_READ_TOKEN`）。單元測試讀的是凍結快照 `tests/fixtures/woow-versions.yaml`（和 fixtures 配套），線上清冊只驗格式；機器人改線上清冊不會讓測試壞掉。新產品要測讀法時，把它加進快照與 fixtures。單元測試完全不連網：`tests/helpers.py` 一載入就擋掉 loopback 以外的連線（有測試想連網會直接報錯，不會被 `wvt` 的連線錯誤處理吞掉），需要的 registry／Gitea 回應一律錄成 fixtures。
 6. 開 PR。改清冊就是改版本政策，**一律人工合併**。
 
 ## 分期
