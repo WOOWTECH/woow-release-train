@@ -1700,6 +1700,7 @@ class Fetcher:
         self.probes = {}  # endpoint -> {"ok": n, "errors": [...]}
         self.cache = {}
         self.commits = {}  # (gitea repo, ref) -> the full commit sha it names | None (no such ref)
+        self.visible = {}  # gitea repo -> can the token see it (a 404 inside it is then "not there")
 
     def _probe(self, ep, err=None):
         pr = self.probes.setdefault(ep, {"ok": 0, "errors": []})
@@ -1749,7 +1750,8 @@ class Fetcher:
         if sha is None:
             return None
         url = "%s/repos/%s/raw/%s?ref=%s" % (self.gitea_api, full, urllib.parse.quote(path), sha)
-        return self._get(url, self._gitea_hdr(), endpoint="gitea")
+        body = self._get(url, self._gitea_hdr(), endpoint="gitea")
+        return body if body is not None else self._not_found(repo)
 
     def resolve_commit(self, repo: str, ref: str):
         """The full commit sha a Gitea branch, tag or (short) sha names; None when there is no such ref.
@@ -1767,9 +1769,28 @@ class Fetcher:
             full = repo.split(":", 1)[1]
             data = self.gitea_json("/repos/%s/commits?sha=%s&limit=1&stat=false&verification=false&files=false"
                                    % (full, urllib.parse.quote(ref, safe="")))
+            if data is None:
+                self._not_found(repo)  # raises when the token cannot see the repo: unreachable, not "no such ref"
+            else:
+                self.visible[repo] = True
             sha = data[0].get("sha") if isinstance(data, list) and data and isinstance(data[0], dict) else None
             self.commits[key] = sha if FULL_COMMIT_RE.match(str(sha or "")) else None
         return self.commits[key]
+
+    def repo_visible(self, repo: str) -> bool:
+        """Can the token see this Gitea repo? Gitea answers 404 for a private repo the token may not read
+        exactly as for a missing repo (checked 2026-10-26: without access the repo, its issues, commits and
+        raw files all 404), so a 404 inside a repo only means "not there" once the repo itself is visible."""
+        if repo not in self.visible:
+            self.visible[repo] = self.gitea_json("/repos/%s" % repo.split(":", 1)[1]) is not None
+        return self.visible[repo]
+
+    def _not_found(self, repo: str):
+        """A Gitea 404 inside `repo`: None when the repo is visible (the ref／file／commit is not there),
+        WvtError when the token cannot see the repo, so the row reads ⚠️ unreachable — never ❔ 不存在."""
+        if self.repo_visible(repo):
+            return None
+        raise WvtError("gitea: 讀不到 %s（HTTP 404：repo 不存在，或權杖沒有讀取權限）" % repo.split(":", 1)[1])
 
     def _gitea_hdr(self):
         return {"Authorization": "token " + self.gitea_token} if self.gitea_token else {}
@@ -1783,6 +1804,8 @@ class Fetcher:
         if host != "gitea":
             raise WvtError("blob_shas only implemented for gitea")
         data = self.gitea_json("/repos/%s/contents/%s?ref=%s" % (full, urllib.parse.quote(path.rstrip("/")), urllib.parse.quote(ref)))
+        if data is None:
+            return self._not_found(repo)
         if not isinstance(data, list):
             return None
         return {x["name"]: x["sha"] for x in data if x.get("type") == "file"}
@@ -1791,7 +1814,7 @@ class Fetcher:
         """Commits head has and base lacks (Gitea compare base...head); None when either is unknown."""
         host, full = repo.split(":", 1)
         data = self.gitea_json("/repos/%s/compare/%s...%s" % (full, base, head))
-        return None if data is None else data.get("total_commits")
+        return self._not_found(repo) if data is None else data.get("total_commits")
 
     def commit_order(self, repo: str, target: str, other: str):
         """Where `other` sits against `target` in repo's history: behind (an ancestor), ahead (a descendant),
@@ -1812,7 +1835,11 @@ class Fetcher:
         if host != "gitea":
             raise WvtError("issue search only implemented for gitea")
         data = self.gitea_json("/repos/%s/issues?state=all&type=issues&limit=50&q=%s" % (full, urllib.parse.quote(query)))
-        return data if isinstance(data, list) else []
+        if data is None:  # never "no record": a token without access to the private repo sees 404 too
+            raise WvtError("gitea: 讀不到 %s 的 issue（HTTP 404：repo 不存在、權杖沒有讀取權限，或沒開 issue）" % full)
+        if not isinstance(data, list):
+            raise WvtError("gitea: %s 的 issue 搜尋回應不是清單" % full)
+        return data
 
 
 _ADDON_TAG = re.compile(r"\b(v\d+\.0\.\d+\.\d+\.\d+)\b")

@@ -1434,7 +1434,7 @@ class BotFetcher(wvt.Fetcher):
                 return None
             st, _, body = http("%s/repos/%s/raw/%s?ref=%s" % (self.gitea_api, full, urllib.parse.quote(path), sha), self._gitea_hdr())
         if st == 404:
-            return None
+            return None if host == "github" else self._not_found(repo)  # a repo the token cannot see raises
         if st != 200:
             raise WvtError("%s %s@%s: HTTP %d" % (repo, path, ref, st))
         return body
@@ -1443,6 +1443,8 @@ class BotFetcher(wvt.Fetcher):
         full = repo.split(":", 1)[1]
         data = self.gitea_json("/repos/%s/commits?sha=%s&path=%s&limit=1&stat=false&verification=false&files=false"
                                % (full, urllib.parse.quote(ref), urllib.parse.quote(path.rstrip("/"))))
+        if data is None:
+            self._not_found(repo)  # raises when the token cannot see the repo
         if not data:
             raise WvtError("%s: no commit touches %s" % (repo, path))
         return data[0]["sha"]

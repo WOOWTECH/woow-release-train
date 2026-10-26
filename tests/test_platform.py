@@ -275,32 +275,56 @@ class FakeGiteaApi:
     """Gitea 1.27 as it answered on 2026-10-26 (fix-woow-release-train/raw/05-gitea-ref-probe.txt):
     commits?sha= resolves a branch, a tag, a full or a SHORT sha to the full sha and 404s a missing ref;
     raw?ref= serves a branch, a tag or a full sha (404 for a missing full sha) and the DEFAULT branch for
-    anything else — a missing tag, or a short sha that exists."""
+    anything else — a missing tag, or a short sha that exists. A repo the token cannot see (`hidden`)
+    answers 404 for everything: the repo itself, its commits, raw files, issues and compares."""
 
     def __init__(self):
-        self.refs = {"develop": SHA_DEV, "v18.0.1.0.266": SHA_266, "v18.0.1.0.258": SHA_258}
-        self.files = {SHA_258: "seed at .258", SHA_266: "seed at .266", SHA_DEV: "seed at develop"}
+        self.repos = {}
+        self.hidden = set()
         self.urls = []
+        self.add("odoo-addons/woow_paas_platform", "develop",
+                 {"develop": SHA_DEV, "v18.0.1.0.266": SHA_266, "v18.0.1.0.258": SHA_258},
+                 {SHA_258: {SEED: "seed at .258"}, SHA_266: {SEED: "seed at .266"}, SHA_DEV: {SEED: "seed at develop"}})
 
-    def resolve(self, ref):
-        if ref in self.refs:
-            return self.refs[ref]
-        hits = [s for s in self.files if len(ref) >= 7 and s.startswith(ref)]
+    def add(self, full, default, refs, files, issues=(), history=()):
+        self.repos[full] = {"default": default, "refs": refs, "files": files, "issues": list(issues), "history": list(history)}
+
+    def resolve(self, repo, ref):
+        if ref in repo["refs"]:
+            return repo["refs"][ref]
+        hits = [s for s in repo["files"] if len(ref) >= 7 and s.startswith(ref)]
         return hits[0] if len(hits) == 1 else None
 
     def __call__(self, url):
         self.urls.append(url)
-        q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
-        if "/commits?" in url:
-            sha = self.resolve(q["sha"][0])
-            return json.dumps([{"sha": sha}]) if sha else None  # 404 -> None
-        if "/raw/" in url:
+        parts = urllib.parse.urlsplit(url)
+        q = urllib.parse.parse_qs(parts.query)
+        full, rest = re.match(r"^/api/v1/repos/([^/]+/[^/]+)(.*)$", parts.path).groups()
+        if full in self.hidden or full not in self.repos:
+            return None  # 404
+        repo = self.repos[full]
+        if rest == "":
+            return json.dumps({"full_name": full})
+        if rest == "/commits":
+            sha = self.resolve(repo, q["sha"][0])
+            return json.dumps([{"sha": sha}]) if sha else None
+        if rest.startswith("/raw/"):
             ref = q["ref"][0]
-            if ref in self.refs:
-                return self.files[self.refs[ref]]
-            if re.fullmatch(r"[0-9a-f]{40}", ref):
-                return self.files.get(ref)
-            return self.files[self.refs["develop"]]  # the trap: Gitea's default branch, HTTP 200
+            if ref in repo["refs"]:
+                sha = repo["refs"][ref]
+            elif re.fullmatch(r"[0-9a-f]{40}", ref):
+                sha = ref
+            else:
+                sha = repo["refs"][repo["default"]]  # the trap: the default branch, HTTP 200
+            return (repo["files"].get(sha) or {}).get(urllib.parse.unquote(rest[len("/raw/"):]))
+        if rest == "/issues":
+            return json.dumps([i for i in repo["issues"] if q["q"][0] in i["title"] + i["body"]])
+        if rest.startswith("/compare/"):  # a linear history: commits head has and base lacks
+            base, head = rest[len("/compare/"):].split("...")
+            h = repo["history"]
+            if base not in h or head not in h:
+                return None
+            return json.dumps({"total_commits": max(0, h.index(head) - h.index(base))})
         raise AssertionError(url)
 
 
@@ -362,6 +386,76 @@ class GiteaRefTest(unittest.TestCase):
         self.assertIsNone(bf.read_bytes(PLATFORM, SEED, "v18.0.1.0.999"))
         self.assertEqual(seen, ["https://gitea.example/api/v1/repos/odoo-addons/woow_paas_platform/raw/src/data/cloud_app_templates.xml?ref="
                                 + SHA_258])
+
+
+SHA_CD = "64c42360ec" + "0" * 30
+
+
+class GiteaNotFoundTest(unittest.TestCase):
+    """A 404 is "not there" only inside a repo the token can see. Gitea hides a private repo from a token
+    without access behind the same 404 (10-26: anonymous search of paas-odoo-ci gave [] → "建置紀錄沒有…"),
+    so a lost CI_GITEA_TOKEN permission must read ⚠️ unreachable, never ❔ no record／file missing."""
+
+    def fetcher(self, hidden=()):
+        api = FakeGiteaApi()
+        api.add("woow-paas/paas-app-bundle-cd", "main", {"main": SHA_CD},
+                {SHA_CD: {PROD_VALUES: fixture("cd", "paas-odoo-platform", "values-prod.yaml")}})
+        api.add("woow-paas/paas-odoo-ci", "main", {"main": SHA_CD}, {}, issues=approval_issues())
+        api.add("WOOWTECH/woow-mcp-server", "main", {"main": FC5}, {}, history=[OLD_4D9, FC5])
+        api.hidden.update(hidden)
+
+        class F(wvt.Fetcher):
+            def _get(self, url, headers=None, endpoint=None):
+                return api(url)
+        return F("https://gitea.example/api/v1", "t"), api
+
+    def src(self):
+        return manifest()["sources"]["prod_platform"]
+
+    def test_visible_repos_resolve_the_platform(self):
+        f, _ = self.fetcher()
+        info = wvt.resolve_platform(f, "prod_platform", self.src())
+        self.assertEqual((info["tag"], info["build_issues"], info["unreachable"]), ("v18.0.1.0.242", [343], False))
+
+    def test_build_records_the_token_cannot_read_are_unreachable(self):
+        f, _ = self.fetcher(hidden={"woow-paas/paas-odoo-ci"})
+        with self.assertRaises(wvt.WvtError) as cm:
+            f.search_issues("gitea:woow-paas/paas-odoo-ci", "20261015.1258")
+        self.assertIn("讀不到 woow-paas/paas-odoo-ci 的 issue（HTTP 404：repo 不存在、權杖沒有讀取權限，或沒開 issue）", str(cm.exception))
+        info = wvt.resolve_platform(f, "prod_platform", self.src())
+        self.assertEqual((info["tag"], info["unreachable"]), (None, True))
+        self.assertIn("讀不到建置紀錄 gitea:woow-paas/paas-odoo-ci（gitea: 讀不到 woow-paas/paas-odoo-ci 的 issue", info["reason"])
+        self.assertNotIn("沒有 woow-paas-docker-local", info["reason"])  # not "no build record"
+
+    def test_a_cd_repo_the_token_cannot_see_is_unreachable(self):
+        f, _ = self.fetcher(hidden={"woow-paas/paas-app-bundle-cd"})
+        info = wvt.resolve_platform(f, "prod_platform", self.src())
+        self.assertTrue(info["unreachable"])
+        self.assertIn("讀不到 woow-paas/paas-app-bundle-cd（HTTP 404：repo 不存在，或權杖沒有讀取權限）", info["reason"])
+        self.assertNotIn("檔案不存在", info["reason"])
+
+    def test_inside_a_visible_repo_a_404_is_still_not_there(self):
+        f, api = self.fetcher()
+        self.assertIsNone(f.read(PLATFORM, "missing.xml", "develop"))
+        self.assertIsNone(f.read(PLATFORM, SEED, "v18.0.1.0.999"))
+        self.assertIsNone(f.read(PLATFORM, SEED, "0" * 40))
+        self.assertIsNone(f.commits_between(MCP_SERVER, FC5, "e" * 40))  # a commit the repo does not have
+        self.assertEqual(f.commit_order(MCP_SERVER, FC5, OLD_4D9), "behind")  # 4d90de3 is before fc5fa02
+        self.assertEqual(sum(u.endswith("/repos/odoo-addons/woow_paas_platform") for u in api.urls), 0)  # commits 200 proved it
+        self.assertEqual(sum(u.endswith("/repos/WOOWTECH/woow-mcp-server") for u in api.urls), 1)  # asked once
+
+    def test_every_read_of_a_hidden_repo_raises(self):
+        f, _ = self.fetcher(hidden={"odoo-addons/woow_paas_platform", "WOOWTECH/woow-mcp-server", "woow-paas/paas-app-bundle-cd"})
+        for call in (lambda: f.read(PLATFORM, SEED, "develop"), lambda: f.read(PLATFORM, SEED, SHA_258),
+                     lambda: f.commits_between(MCP_SERVER, FC5, OLD_4D9), lambda: f.blob_shas(CD, "paas-odoo-platform", "main")):
+            with self.assertRaises(wvt.WvtError):
+                call()
+        # an identity row whose history repo is hidden says why it cannot place the commit
+        p = manifest()["products"]["woow-mcp-server"]
+        pin = p["legs"]["paas"]["pins"][1]
+        res = wvt.evaluate(p, "paas", pin, {"raw": {"tag": "b" * 40}, "value": "b" * 40, "digest": None}, TODAY, order=f.commit_order)
+        self.assertEqual(res["status"], "mismatch")
+        self.assertIn("無法向 WOOWTECH/woow-mcp-server 確認先後：gitea: 讀不到 WOOWTECH/woow-mcp-server（HTTP 404", res["findings"][0]["message"])
 
 
 class SourcesManifestTest(unittest.TestCase):
