@@ -533,16 +533,17 @@ products:
       downgrade: allowed
       hard_rules: []
     target:
-      version: "20261024.0943"      # core build id（core tag＝PaaS 外殼 tag）
-      since: "2026-10-24"
+      version: "20261026.0712"      # core build id（core tag＝PaaS 外殼 tag）
+      since: "2026-10-26"
       platforms:
-        amd64: "sha256:ffbb2bd070c488d79d960ee72fb7717f43791af6a4ae1585943598ad444a76e0"   # 單一架構 manifest（不是 index）
+        amd64: "sha256:366e337dc7ea192526468de33ad3f2f0ce97be3ffba9b8382a0c1d9ab88b1404"   # 單一架構 manifest（不是 index）
       identity:
         upstream_version: "0.24.1"
-        fork_commit: "b8a1371924d3aedb74dff563a5ff35a783919dee"        # woow-od-v0.24.1-w2.4（外掛頁內建 MCP Server／CLI 終端機，預設分頁置頂）
+        fork_commit: "c8ae3900f9ff5d58f50d11f4055756f6e7f14a25"        # woow-od-v0.24.1-w2.5（原生 Paseo 入口、原子 MCP 註冊、手機操作）
         upstream_commit: "89e64d813bb1c7a11519b3f668f011f7017637d7"    # open-design-v0.24.1
-      verified: "20261024.0943 的 digest 以 crane 從 jcr-prod 讀回（paas-odoo-ci 核可單 #401，promote run 27155），並依 digest 複製到 GHCR、匿名讀回相同（2026-10-24T10:06Z）"
+      verified: "2026-10-26：建置 28347 通過原生預設啟動、Paseo 與完整 MCP 容器驗收；核可單 #419、promote run 28385，crane 讀回 JCR 正式 tag 與候選 digest 相同；依原 digest 複製至 GHCR，2026-10-26T07:29Z 匿名讀回一致。"
     known_versions:
+      - {version: "20261024.0943", platforms: {amd64: "sha256:ffbb2bd070c488d79d960ee72fb7717f43791af6a4ae1585943598ad444a76e0"}}   # HA 0.2.5～0.2.6；fork w2.4
       - {version: "20261024.0713", platforms: {amd64: "sha256:bdb9febc456e48ee264ba506192b5d6553b65d9aadb132a45703b42af23b5aa8"}}   # fork w2.3；未上線（內建外掛只在「已安裝」分頁）
       - {version: "20261018.1219", platforms: {amd64: "sha256:f349632632e0c3fa9e546da8e83f89aa60d283d473fdf47fffa5728e01cde023"}}   # HA 0.2.3～0.2.4；fork w2.2
       - {version: "20261015.0617", platforms: {amd64: "sha256:c5496453136b5ddc1ec3376c0f7518bfb2ba5091ff1ba75bfadf645d1c52a683"}}   # HA 0.2.1～0.2.2 現用；無 OD_APP_VERSION（/api/version 回 0.23.1）
@@ -572,6 +573,7 @@ products:
             record: cloud_app_opendesign
             tag_as_version: true
             compare: version
+          - {id: test-core, label: PR 容器測試核心, repo: "gitea:woow-paas/paas-odoo-ci", ref: main, file: .gitea/workflows/test-open-design-mcp.yml, kind: yaml, path: jobs.mcp-e2e.env.TEST_CORE, parse: image_ref, compare: platforms.amd64}
           - {id: fork-commit, label: fork commit（od-source.env）, repo: "gitea:woow-paas/paas-odoo-ci", ref: main, file: open-design/od-source.env, kind: regex, pattern: '^OD_SOURCE_SHA=([0-9a-f]{40})\s*$', compare: identity.fork_commit}
           - {id: upstream-version, label: 上游 OpenDesign 版本（od-source.env）, repo: "gitea:woow-paas/paas-odoo-ci", ref: main, file: open-design/od-source.env, kind: regex, pattern: '^OD_UPSTREAM_VERSION=(\S+)\s*$', compare: identity.upstream_version}
           - {id: chart, label: chart appVersion, repo: "gitea:woow-paas/woow-paas-charts", ref: main, file: charts/open-design/Chart.yaml, kind: yaml, path: appVersion, compare: identity.upstream_version}
@@ -588,9 +590,9 @@ products:
         fanout: {enabled: false, reason: "core 由 paas-odoo-ci 每次建置重建，版本由 od-source.env 決定"}
     exceptions: []
     notes:
-      - "目標取 PaaS 目前的 20261018.1219（多了 OD_APP_VERSION，/api/version 回 0.24.1）。HA 仍是 20261015.0617：到 HA repo Actions 跑 Import open-design-core（tag 20261018.1219、digest 如上）再 .github/scripts/pin-core.sh。兩顆 core 的 fork commit、CLI 版本相同，差別只有 OD_APP_VERSION；外殼的 MCP runtime 也相同（PaaS 複製 HA 200e8cbb，65 個檔案的 sha256 與 HA 現況逐檔一致）。若要以 HA 現況為目標，改成 20261015.0617／c5496453…，PaaS 會顯示『領先』。"
-      - "PaaS repo 內沒有 core digest（seed 釘外殼 digest 52423ef6…），所以 PaaS 只能比 build id；建議 paas-odoo-ci 在核可後寫一份 core digest 檔，才能對 digest 做硬規則。"
-      - "上游已到 0.26.1（2026-10-22），fork 仍在 0.24.1；升 fork 時 target 一次改兩邊。"
+      - "PaaS 與 HA 外殼共用同一個不可變 open-design-core；原生 Paseo 入口與 MCP API 在核心編譯，兩端外殼另安裝共享 runtime 0.2.1，各自負責啟動與驗證邊界。"
+      - "PaaS 商品 seed 記錄外殼 tag/digest；PR 測試另外釘相同核心 digest。既有 deployment_policy=pinned 服務保留原版本，商品預設更新不代表所有既有服務已更新。"
+
 
   # ============================================================== MCP 家族
   # HA＝WOOWTECH/Woow_ha_mcp_addons（預設分支 claude-delivery；程式在 apps/<p>、apps/runtime、packages/）。
