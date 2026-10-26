@@ -885,6 +885,20 @@ products:
           - {id: opendesign, label: seed MCP 映像 opendesign-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_opendesign, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.opendesign-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
           - {id: litellm, label: seed MCP 映像 litellm-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_litellm, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.litellm-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
           - {id: nextcloud, label: seed MCP 映像 nextcloud-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_nextcloud, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.nextcloud-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
+        coverage:   # seed 裡 image 是 *-mcp-admin 的範本都要在上面釘，或在 exclude 寫明為什麼不追；新範本沒釘 → ❔（drift 與平台 PR 的 check 都看）
+          file: src/data/cloud_app_templates.xml
+          image: '-mcp-admin$'
+          exclude:
+            cloud_app_mcp_odoo_manage: "odoo-manage 已移出 workspace，映像凍結在 d5032a72（chart 0.1.5、is_hidden）；10-25 正式站 26 個 MCP 服務沒有一個用它。要再上架先改釘 woow-mcp-server 的建置、再加進 pins"
+        package_version:   # 8 個範本的 chart 版號（mcp-server chart，包裝，只列參考）
+          - {label: seed chart 版號（hermes）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_hermes, field: helm_chart_version, also_refs: [develop]}
+          - {label: seed chart 版號（odoo）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_odoo, field: helm_chart_version, also_refs: [develop]}
+          - {label: seed chart 版號（n8n）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_n8n, field: helm_chart_version, also_refs: [develop]}
+          - {label: seed chart 版號（k8s）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_k8s, field: helm_chart_version, also_refs: [develop]}
+          - {label: seed chart 版號（vk）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_vk, field: helm_chart_version, also_refs: [develop]}
+          - {label: seed chart 版號（opendesign）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_opendesign, field: helm_chart_version, also_refs: [develop]}
+          - {label: seed chart 版號（litellm）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_litellm, field: helm_chart_version, also_refs: [develop]}
+          - {label: seed chart 版號（nextcloud）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_nextcloud, field: helm_chart_version, also_refs: [develop]}
     exceptions: []
     notes:
       - "fc5fa02＝MCP 預設全開＋既有服務一次性遷移（woow-mcp-server #84）；平台 .261 起 8 個範本都釘它。這裡只看範本：既有租戶服務要換映像才會跑遷移（10-25 換了 26 個），drift 不讀租戶實際跑的映像。"

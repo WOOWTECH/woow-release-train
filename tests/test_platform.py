@@ -224,7 +224,7 @@ class McpImageLegTest(unittest.TestCase):
     def test_eight_templates_three_points_aligned(self):
         f = FakeFetcher()
         rep = wvt.collect_drift(self.m, f, TODAY)
-        rs = rows(rep, "woow-mcp-server")
+        rs = [r for r in rows(rep, "woow-mcp-server") if r["compare"] == "identity.commit"]
         self.assertEqual(len(rs), 24)
         self.assertEqual({r["source"] for r in rs}, {"prod", "stg", "branch"})
         self.assertEqual(sorted({r["pin"] for r in rs}), sorted(["hermes", "odoo", "n8n", "k8s", "vk", "opendesign", "litellm", "nextcloud"]))
@@ -234,6 +234,11 @@ class McpImageLegTest(unittest.TestCase):
                       wvt.render_markdown(self.m, rep))
         # aligned rows never ask Gitea for the commit order (the shared-files row asks about charts only)
         self.assertFalse(any(c[0] == "compare" and c[1] == MCP_SERVER for c in f.calls))
+        # one coverage row per compared point, and the chart versions as reference rows
+        cov = rows(rep, "woow-mcp-server", "coverage")
+        self.assertEqual([(r["source"], r["status"]) for r in cov], [("prod", "ok"), ("stg", "ok"), ("branch", "ok")])
+        charts = rows(rep, "woow-mcp-server", "package_version")
+        self.assertEqual((len(charts), {r["status"] for r in charts}, {r["version"] for r in charts}), (16, {"info"}, {"0.1.9"}))
 
     def test_prod_seed_on_a_known_older_commit_is_behind(self):
         # platform .258 pinned all eight to 4d90de3 (before all-on); this used to be an info row (✅)
@@ -290,7 +295,11 @@ class McpImageLegTest(unittest.TestCase):
             return rc, buf.getvalue()
         rc, out = check(fixture("paas_platform", "src", "data", "cloud_app_templates.xml"))
         self.assertEqual(rc, 0)
-        self.assertEqual(out.count("✅ 一致"), 8, out)
+        self.assertEqual(out.count("✅ 一致"), 9, out)  # the 8 pins and the coverage row
+        self.assertIn("9 個 image 符合 `-mcp-admin$` 的範本：8 個有釘點、1 個排除", out)
+        rc, out = check(with_new_template())
+        self.assertEqual(rc, 0)  # no hard rules: a warning
+        self.assertIn("seed 有 cloud_app_mcp_newthing（newthing-mcp-admin:4d90de3bd26e），清冊沒有釘點", out)
         rc, out = check(seed_with("cloud_app_mcp_hermes", OLD_4D9))
         self.assertEqual(rc, 0)  # no hard rules: a warning
         self.assertIn("🟠 落後", out)
@@ -359,6 +368,64 @@ class FakeGiteaApi:
                 return None
             return json.dumps({"total_commits": max(0, h.index(head) - h.index(base))})
         raise AssertionError(url)
+
+
+def with_new_template(text=None):
+    """The fixture seed plus a 10th MCP template the manifest does not pin (on the pre-all-on 4d90de3 build)."""
+    text = text or fixture("paas_platform", "src", "data", "cloud_app_templates.xml")
+    rec = ('        <record id="cloud_app_mcp_newthing" model="woow_paas_platform.cloud_app_template">\n'
+           '            <field name="helm_chart_version">0.1.9</field>\n'
+           '            <field name="helm_default_values">{"image": {"repository": "jcr-prod.woowtech.io/woow-paas-docker-local/'
+           'newthing-mcp-admin", "tag": "%s@sha256:%s"}}</field>\n        </record>\n    </data>' % (OLD_4D9, "1" * 64))
+    assert text.count("    </data>") == 1
+    return text.replace("    </data>", rec)
+
+
+class CoverageTest(unittest.TestCase):
+    """Every seed template whose image is a woow-mcp-server build (*-mcp-admin) is pinned, or excluded with a
+    reason (10-26 review: a 10th MCP template would not be noticed; odoo_manage is active but untracked)."""
+
+    def setUp(self):
+        self.m = manifest()
+
+    def test_a_new_template_without_a_pin_is_unknown(self):
+        rep = wvt.collect_drift(self.m, FakeFetcher(overrides={(PLATFORM, SEED, "develop"): with_new_template()}), TODAY)
+        cov = {r["source"]: r for r in rows(rep, "woow-mcp-server", "coverage")}
+        self.assertEqual({k: r["status"] for k, r in cov.items()}, {"prod": "ok", "stg": "ok", "branch": "unknown"})
+        self.assertIn("seed 有 cloud_app_mcp_newthing（newthing-mcp-admin:4d90de3bd26e），清冊沒有釘點：加進 pins，或寫進 "
+                      "coverage.exclude 並說明為什麼不追", cov["branch"]["findings"][0]["message"])
+        self.assertTrue(rep["drift"])
+        self.mcp_only_drift(rep)
+
+    def mcp_only_drift(self, rep):
+        dirty = {(r["pin"], r.get("source")) for r in rep["rows"] if r["product"] == "woow-mcp-server" and r["status"] in wvt.DRIFT_STATUSES}
+        self.assertEqual(dirty, {("coverage", "branch")})
+
+    def test_the_excluded_template_is_listed_with_its_reason(self):
+        rep = wvt.collect_drift(self.m, FakeFetcher(), TODAY)
+        r = rows(rep, "woow-mcp-server", "coverage", "prod")[0]
+        self.assertEqual(r["status"], "ok")
+        self.assertIn("cloud_app_mcp_odoo_manage 不追（odoo-manage-mcp-admin:d5032a72f8d8）：odoo-manage 已移出 workspace",
+                      wvt.render_markdown(self.m, rep))
+
+    def test_unknown_platform_points_are_left_to_the_pins(self):
+        rep = wvt.collect_drift(self.m, FakeFetcher(issues=[]), TODAY)  # production and staging unknown
+        self.assertEqual([r["source"] for r in rows(rep, "woow-mcp-server", "coverage")], ["branch"])
+
+    def test_manifest_rules(self):
+        cov = self.m["products"]["woow-mcp-server"]["legs"]["paas"]["coverage"]
+        cov["exclude"]["cloud_app_mcp_odoo"] = "also pinned"
+        cov["exclude"]["cloud_app_mcp_x"] = ""
+        errs = wvt.validate_manifest(self.m, TODAY, expiry=False)[0]
+        for needle in ("coverage.exclude.cloud_app_mcp_odoo is also pinned", "coverage.exclude.cloud_app_mcp_x needs the reason"):
+            self.assertTrue(any(needle in e for e in errs), (needle, errs))
+        m = manifest()
+        m["products"]["woow-mcp-server"]["legs"]["paas"]["coverage"]["image"] = "(unclosed"
+        self.assertTrue(any("coverage needs file and image" in e for e in wvt.validate_manifest(m, TODAY, expiry=False)[0]))
+        m = manifest()
+        m["products"]["woow-mcp-server"]["legs"]["paas"]["coverage"]["file"] = "other.xml"
+        self.assertTrue(any("coverage: no seed_image pin of this leg reads other.xml" in e
+                            for e in wvt.validate_manifest(m, TODAY, expiry=False)[0]))
 
 
 class GiteaRefTest(unittest.TestCase):

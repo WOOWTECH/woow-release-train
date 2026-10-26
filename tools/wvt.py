@@ -703,6 +703,48 @@ def extract_seed_image(text: str, record: str, image_path: str = "image"):
             "raw": "%s:%s" % (repo, tag) if repo else tag}
 
 
+def seed_images(text: str) -> dict:
+    """{record id: (image.repository, tag)} of every seed record whose helm_default_values names an image."""
+    out = {}
+    for rec in ET.fromstring(text.encode("utf-8") if isinstance(text, str) else text).iter("record"):
+        raw = next(((f.text or "").strip() for f in rec.findall("field") if f.get("name") == "helm_default_values"), "")
+        try:
+            img = (json.loads(raw) or {}).get("image") if raw else None
+        except (ValueError, AttributeError):
+            img = None
+        if isinstance(img, dict) and img.get("repository"):
+            out[rec.get("id")] = (img["repository"], parse_image_ref(img.get("tag") or "").get("tag") if img.get("tag") else None)
+    return out
+
+
+def coverage_pins(p: dict, leg: str) -> set:
+    """The seed records a leg pins in its coverage file (seed_image pins on that file, in the leg's repo)."""
+    legd = (p.get("legs") or {}).get(leg) or {}
+    cov = legd.get("coverage") or {}
+    return {pin.get("record") for pin in iter_pins(p, leg)
+            if pin.get("kind") == "seed_image" and pin.get("file") == cov.get("file") and pin.get("repo") == legd.get("repo")}
+
+
+def coverage_findings(p: dict, leg: str, text: str) -> list:
+    """Findings of a leg's `coverage` rule over one seed: every record whose image.repository matches
+    coverage.image must be pinned on this leg (a seed_image pin on that file) or excluded with a reason.
+    A new MCP template the manifest does not know is ❔ — it could still be on a pre-all-on image."""
+    cov = ((p.get("legs") or {}).get(leg) or {}).get("coverage") or {}
+    pat = re.compile(cov["image"])
+    pinned = coverage_pins(p, leg)
+    excl = cov.get("exclude") or {}
+    hits = {rid: img for rid, img in seed_images(text).items() if pat.search(img[0])}
+
+    def image(rid):
+        return "%s:%s" % (hits[rid][0].split("/")[-1], _id(hits[rid][1]) if hits[rid][1] else "?")
+    fs = [finding("unknown", "coverage", "seed 有 %s（%s），清冊沒有釘點：加進 pins，或寫進 coverage.exclude 並說明為什麼不追"
+                  % (rid, image(rid))) for rid in sorted(set(hits) - pinned - set(excl))]
+    fs += [finding("info", "coverage", "%s 不追（%s）：%s" % (rid, image(rid), excl[rid])) for rid in sorted(set(hits) & set(excl))]
+    fs.append(finding("ok", "coverage", "%d 個 image 符合 `%s` 的範本：%d 個有釘點、%d 個排除"
+                      % (len(hits), cov["image"], len(set(hits) & pinned), len(set(hits) & set(excl)))))
+    return fs
+
+
 def extract_catalog(text: str, comp_id: str):
     data = json.loads(text)
     comp = (data.get("components") or {}).get(comp_id)
@@ -1089,6 +1131,24 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
                 if hist is not None and not (str(cmp_).startswith("identity.") and str(hist).startswith("gitea:")
                                              and REPO_RE.match(str(hist))):
                     E("%s: history must be gitea:OWNER/REPO and goes with an identity compare" % pw)
+            cov = legs[leg].get("coverage")
+            if cov is not None:
+                cw = "%s.legs.%s.coverage" % (where, leg)
+                seeds = coverage_pins(p, leg)
+                try:
+                    re.compile(str(cov.get("image") or ""))
+                    bad_re = not cov.get("image")
+                except re.error:
+                    bad_re = True
+                if not cov.get("file") or bad_re:
+                    E("%s needs file and image (a regex on image.repository)" % cw)
+                elif not seeds:
+                    E("%s: no seed_image pin of this leg reads %s" % (cw, cov.get("file")))
+                for rid, why in (cov.get("exclude") or {}).items():
+                    if not isinstance(why, str) or not why.strip():
+                        E("%s.exclude.%s needs the reason as a string" % (cw, rid))
+                    if rid in seeds:
+                        E("%s.exclude.%s is also pinned" % (cw, rid))
             pkgs = legs[leg].get("package_version") or []
             for pkg in ([pkgs] if isinstance(pkgs, dict) else pkgs):
                 kw = "%s.legs.%s.package_version[%s]" % (where, leg, pkg.get("label"))
@@ -1582,6 +1642,14 @@ def check_repo(m: dict, leg: str, repo_dir: str, repo: str | None, today, produc
             rows.append(({"id": "license", "file": judged[0][0]["file"]}, {"status": "violation", "version": None, "findings": [
                 finding("violation", "license_ceiling", "判讀不出上游版本，無法確認授權上限 %s：先把這個 digest 登記進清冊（target 或 known_versions）"
                         % ceiling)]}))
+        cov = ((p.get("legs") or {}).get(leg) or {}).get("coverage")
+        cov_path = os.path.join(repo_dir, cov["file"]) if cov else None
+        if cov and (not repo or p["legs"][leg].get("repo") == repo) and os.path.exists(cov_path):
+            try:
+                fs = coverage_findings(p, leg, _read(cov_path))
+            except (ET.ParseError, ValueError) as exc:
+                fs = [finding("unknown", "coverage", "解析失敗：%s" % exc)]
+            rows.append(({"id": "coverage", "file": cov["file"]}, _rollup(fs)))
         for sf in p.get("shared_files") or []:
             for c in sf.get("consumers") or []:
                 if c["leg"] != leg or (repo and c["repo"] != repo):
@@ -2052,6 +2120,8 @@ def collect_drift(m: dict, f: Fetcher, today: _dt.date | None = None) -> dict:
                         rows.append(row)
                         continue
                     rows.append(_observe_remote(m, p, leg, pin, rref, f, today, row))
+            if legd.get("coverage"):
+                rows.extend(_coverage_rows(p, pname, leg, legd, f, ctx))
             pub = legd.get("published")
             if pub:
                 rows.extend(_published_rows(p, pname, leg, legd, pub, f, today, catalogs))
@@ -2115,6 +2185,37 @@ def _observe_remote(m, p, leg, pin, ref, f, today, row):
     res = evaluate(p, leg, pin, obs, today, order=f.commit_order)
     row.update(status=res["status"], version=res["version"], observed=obs, findings=res["findings"])
     return row
+
+
+def _coverage_rows(p, pname, leg, legd, f, ctx):
+    """One coverage row per point the leg's seed pins compare (their ref and also_refs). A point whose
+    platform release is unknown, or whose seed cannot be read, is left to the pin rows (they say why)."""
+    cov = legd["coverage"]
+    repo = legd.get("repo")
+    pinned = coverage_pins(p, leg)
+    points = []
+    for pin in iter_pins(p, leg):
+        if pin.get("record") in pinned and pin.get("kind") == "seed_image" and pin["file"] == cov["file"] and pin["repo"] == repo:
+            points += [r for r in [pin["ref"]] + list(pin.get("also_refs") or []) if r not in points]
+    rows = []
+    for ref in points:
+        rref = resolve_ref(ref, ctx)
+        try:
+            text = f.read(repo, cov["file"], rref) if rref else None
+        except WvtError:
+            text = None
+        if not text:
+            continue
+        try:
+            fs = coverage_findings(p, leg, text)
+        except (ET.ParseError, ValueError) as exc:
+            fs = [finding("unknown", "coverage", "解析失敗：%s" % exc)]
+        row = {"product": pname, "leg": leg, "pin": "coverage", "file": cov["file"], "repo": repo, "ref": rref,
+               "point": _point_label({"id": "coverage", "label": cov.get("label") or "範本覆蓋"}, ref, rref, ctx),
+               "compare": "coverage", "source": _ref_source(ref), "observed": None}
+        row.update(_rollup(fs))
+        rows.append(row)
+    return rows
 
 
 def _published_rows(p, pname, leg, legd, pub, f, today, catalogs):

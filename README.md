@@ -72,7 +72,7 @@ products:
         consumers: [{ leg: ha, repo: ..., lock: ... }]
     legs:
       ha:   { repo: "github:WOOWTECH/...", pins: [...], package_version: [...], published: {kind: catalog, ...} }
-      paas: { pins: [...], package_version: [...] }
+      paas: { pins: [...], package_version: [...], coverage: { file: ..., image: '<regex>', exclude: { <record>: <理由> } } }
     exceptions:                     # 必須有 what / reason / approved_by / expires；到期 validate 就失敗
       - { leg: ha, what: ..., reason: ..., approved_by: ..., expires: "YYYY-MM-DD", waives: [behind] }
 observations: [...]                 # 線上部署的手動快照（非真相來源，只供報告參考）
@@ -103,6 +103,7 @@ probes: { api.github.com: https://api.github.com/rate_limit }   # 只測連線�
 - `match: prefix`：identity 允許短 sha（至少 7 碼）；`tag_as_version: true`：seed 映像的 tag 就是版本（例如 OpenDesign 外殼 tag＝core build id）。
 - `digest: artifacts.<名稱>`（identity 釘點用）：tag 等於目標時，digest 也必須是 `target` 記的那次建置，否則「不符」。例如 PaaS MCP 映像 tag＝woow-mcp-server commit、digest＝那次 CI 建置。
 - `history: "gitea:OWNER/REPO"`（identity 釘點用）：commit 不是目標、`known_versions` 也沒記（`known_versions[].identity`）時，`drift` 問 Gitea 先後——目標之前的 commit＝落後 🟠、之後＝領先 🔵（清冊要跟上）、分岔或不存在＝不符 🔴。離線的 `check` 不問，一律「不符」。
+- `coverage`（leg 層級，選填）：seed 裡 `helm_default_values` 的 `image.repository` 符合 `image`（regex）的 record，都必須是這一邊的 `seed_image` 釘點，或寫在 `exclude` 並附理由；沒釘也沒排除的新範本，在 `drift`（每個比對點）與 `check`（平台 PR）都是 ❔。woow-mcp-server 用它抓「新增的 `*-mcp-admin` 範本」，`cloud_app_mcp_odoo_manage` 寫在 exclude（映像凍結在 d5032a72）。
 - `ref`：分支或 tag。`$prod_platform`／`$stg_platform` 代表 CD 釘給正式站／staging 的平台版（CD main 釘的 image 的平台版，不是 Fleet 實際套用的結果；見下面 `drift` 的資料來源）；`also_refs: [$stg_platform, develop]` 會同時比這些點。
 
 **只比上游身分。** add-on 版號、chart 版號、JCR 時間戳 tag 都是各邊自己的包裝，只放在 `package_version` 列參考。例如 HA EMQX 的 add-on 標 5.9.1，實際包的是上游 5.8.9；授權上限 `<5.9.0` 只看 5.8.9。
@@ -139,7 +140,7 @@ python3 -m unittest discover -s tests -v
 - **平台版從哪來**：`sources.<名稱>`（kind `cd_image`）讀 CD（`paas-app-bundle-cd` main）values 的 `image.repository`＋`image.tag`，再到 `builds` 的 paas-odoo-ci 建置核可單（作者 `gitea-actions`、標題 `[prod-approval:build-image.yml] Build <repository>:<tag>`）取 `approval-context` 的 `ADDON_REF`。核可後的建置就是用這組值 clone 平台、再驗 image 內 addon 版號＝clone 版號，所以它就是那顆 image 的平台版。找不到、互相矛盾、不是 `v18.x` tag → 報告寫「**未知**」，`$<名稱>` 的列標 ❔（讀不到檔或核可單是 ⚠️）、drift＝true，不退回檔頭的發版註記；註記只用來交叉比對，和建置紀錄不同時寫在備註。來源設了 `on_unknown: info`（staging）時，「讀得到、但判讀不出來」只列 ℹ️、不算漂移：staging 平時跑沒有核可單的 addon-only 建置（下面「已知限制」），算進漂移的話追蹤 issue 整個 QA 期間都會開著；讀不到（⚠️）照樣算。正式站維持預設（`drift`）。
 - **Gitea 的 ref 先解析成完整 commit sha**：Gitea 的 raw API 只認分支、tag 和完整 sha；不存在的 tag／分支、以及確實存在的短 sha，都會回預設分支的內容（HTTP 200）。所以讀檔前先用 commits API 把 ref 解析成完整 sha（分支、tag、短 sha 都行；不存在就當「檔案不存在」），再用這個完整 sha 讀 raw。同一次執行裡每個 repo＋ref 只查一次，同一個分支的各檔案也都讀同一個 commit。
 - **404 分清「不存在」和「讀不到」**：Gitea 對權杖看不到的私人 repo 一律回 404（repo 本身、commits、raw、issue 都是，10-26 實測）。repo 內的 404 要先確認 repo 本身看得到才算「不存在」（❔）；repo 看不到、或建置核可單的 issue 搜尋回 404，一律算「讀不到」（⚠️），報告不會寫成「沒有核可單」或「檔案不存在」——`CI_GITEA_TOKEN` 失去 paas-odoo-ci 或 CD 的讀取權限時，一眼就看得出來。
-- **PaaS MCP 映像**（產品 `woow-mcp-server`）：8 個 MCP 範本（`cloud_app_mcp_*`）的 image tag 比清冊的 woow-mcp-server 目標 commit、digest 比目標那次建置；正式站、staging、develop 三個點都比。
+- **PaaS MCP 映像**（產品 `woow-mcp-server`）：8 個 MCP 範本（`cloud_app_mcp_*`）的 image tag 比清冊的 woow-mcp-server 目標 commit、digest 比目標那次建置；正式站、staging、develop 三個點都比。每個點另有一列「範本覆蓋」（`coverage`：seed 裡所有 `*-mcp-admin` 範本都有釘點或寫明排除理由），8 個範本的 chart 版號列成參考（正式站、develop）。
 - **共用檔**：比對 HA lock 記錄的 git blob 和 charts main 的 blob。
 - **連線狀況**：每個端點的連線結果會列在報告最後。
 
