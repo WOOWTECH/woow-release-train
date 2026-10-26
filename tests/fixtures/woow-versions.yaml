@@ -1,4 +1,5 @@
 # 測試用的凍結快照（2026-10-24 main 5cb9f40 的 woow-versions.yaml），和 tests/fixtures 的檔案配套。
+# 2026-10-26 只跟著格式改：sources 改 kind cd_image（＋stg_platform）。
 # 不要跟著線上清冊更新：機器人會改線上清冊，測試要固定的輸入。線上清冊只做格式驗證（test_manifest）。
 # woow-versions.yaml — HA ↔ PaaS 版本清冊（唯一真相來源）
 #
@@ -28,14 +29,26 @@ phase: 1            # 0 只報告 → 1 警告＋硬規則 → 2 機器人開 PR
 enforcement: hard-rules
 
 sources:
-  # 正式站 Fleet 釘的平台版（Odoo 映像建自哪個 woow_paas_platform tag）。
-  # 該 tag 只寫在 image 區塊的註解（"Built from addon_ref v18.0.1.0.NNN"），
-  # wvt 讀第一個出現的 addon_ref；讀不到就只比 develop 並在報告備註。
+  # 正式站／staging 的 Fleet 實際部署哪個平台版（seed 要讀 woow_paas_platform 的哪個 tag）。
+  # kind cd_image：讀 CD values 的 image（repository＋tag），再到 builds 的建置核可單
+  # （作者 gitea-actions、標題「[prod-approval:<workflow>] Build <repository>:<tag>」）取 approval-context 的
+  # ADDON_REF——核可後的建置就是用這組值 clone 平台、並驗 image 內的 addon 版號＝clone 版號。
+  # 找不到、互相矛盾、不是 v18.x tag → 平台版「未知」：$<名稱> 的列不比對、drift=true。
+  # values 檔頭的發版註記是人手寫的（10-26 還停在 .258），只拿來交叉比對，不當版號來源。
   prod_platform:
+    label: 正式站
     repo: "gitea:woow-paas/paas-app-bundle-cd"
     file: paas-odoo-platform/values-prod.yaml
     ref: main
-    kind: cd_addon_ref
+    kind: cd_image
+    builds: {repo: "gitea:woow-paas/paas-odoo-ci", workflow: build-image.yml}
+  stg_platform:
+    label: staging
+    repo: "gitea:woow-paas/paas-app-bundle-cd"
+    file: paas-odoo-platform-stg/values-stg.yaml
+    ref: main
+    kind: cd_image
+    builds: {repo: "gitea:woow-paas/paas-odoo-ci", workflow: build-image.yml}   # staging 專用的 addon-only 建置沒有核可單 → 未知
 
 # 只測連線、不影響漂移判定：第 2 期機器人要從 Gitea runner 打 GitHub API 開 PR。
 probes:

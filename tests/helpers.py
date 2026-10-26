@@ -79,15 +79,24 @@ LITELLM_MAIN_BLOBS = {
 }
 
 
-class FakeFetcher(wvt.Fetcher):
-    """Serves fixtures instead of the network. overrides: {(repo, path, ref): text|None|Exception}."""
+def approval_issues():
+    """The recorded paas-odoo-ci build approval issues (tests/fixtures/gitea)."""
+    with open(os.path.join(FIX, "gitea", "paas-odoo-ci-approval-issues.json"), encoding="utf-8") as fh:
+        return json.load(fh)["issues"]
 
-    def __init__(self, overrides=None, unreachable=(), blobs=None, behind=7):
+
+class FakeFetcher(wvt.Fetcher):
+    """Serves fixtures instead of the network. overrides: {(repo, path, ref): text|None|Exception}.
+
+    issues: the paas-odoo-ci issues an issue search sees (default: the recorded approval issues)."""
+
+    def __init__(self, overrides=None, unreachable=(), blobs=None, behind=7, issues=None):
         super().__init__()
         self.overrides = overrides or {}
         self.unreachable = set(unreachable)
         self.blobs = LITELLM_MAIN_BLOBS if blobs is None else blobs
         self.behind = behind
+        self.issues = approval_issues() if issues is None else issues
         self.calls = []
 
     def read(self, repo, path, ref):
@@ -119,6 +128,12 @@ class FakeFetcher(wvt.Fetcher):
 
     def commits_between(self, repo, base, head):
         return self.behind
+
+    def search_issues(self, repo, query):
+        self.calls.append(("search", repo, query))
+        if "gitea" in self.unreachable or repo in self.unreachable:
+            raise wvt.WvtError("gitea unreachable: simulated")
+        return [dict(i) for i in self.issues if query in (i.get("title") or "") or query in (i.get("body") or "")]
 
     # wvtbot.BotFetcher extras
     def read_bytes(self, repo, path, ref):

@@ -1,0 +1,16 @@
+# paas-odoo-platform-stg — stg values (trimmed test fixture; layout as cd main 2026-10-26).
+# tag 20261016.0331 is the real .243 build (paas-odoo-ci#347); only the digest's first 8 hex are real.
+profile: platform
+
+replicas: 1
+
+# Built from addon_ref: v18.0.1.0.243 (4454a9a7).
+# Stage the exact production candidate digest; retain staging credentials and configuration.
+image:
+  registry: jcr-prod.woowtech.io
+  repository: woow-paas-docker-local/paas-odoo-official
+  tag: '20261016.0331'
+  digest: sha256:a978a970f1c2d3e4b5a69788796a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a
+  pullPolicy: IfNotPresent
+imagePullSecrets:
+- name: jfrog-registry

@@ -1,0 +1,82 @@
+{
+  "_recorded": "2026-10-26 錄自 GET /api/v1/repos/woow-paas/paas-odoo-ci/issues?state=all&type=issues&q=<image tag>；只留 number、title、state、created_at、user.login、body 的 approval-context（拿掉 APPROVAL_SEAL、TAG_PUSHER、DEADLINE_EPOCH 與說明文字）",
+  "issues": [
+    {
+      "number": 428,
+      "title": "[prod-approval:build-pi-agent-image.yml] Build woow-paas-docker-local/pi-agent:20261026.1100",
+      "state": "open",
+      "created_at": "2026-10-26T11:04:32Z",
+      "user": {
+        "login": "gitea-actions"
+      },
+      "pull_request": null,
+      "body": "## 需要 prod build 人工審核\n\n- **Image**: `woow-paas-docker-local/pi-agent:20261026.1100`\n\n<!-- approval-context\nWORKFLOW_MARKER=build-pi-agent-image.yml\nIMAGE_TAG=20261026.1100\nIMAGE_NAME=woow-paas-docker-local/pi-agent\nADDON_REF=\nTIMEOUT_MIN=180\n-->"
+    },
+    {
+      "number": 426,
+      "title": "[prod-approval:build-image.yml] Build woow-paas-docker-local/paas-odoo-official:20261026.1100",
+      "state": "closed",
+      "created_at": "2026-10-26T11:00:38Z",
+      "user": {
+        "login": "gitea-actions"
+      },
+      "pull_request": null,
+      "body": "## 需要 prod build 人工審核\n\n- **Image**: `woow-paas-docker-local/paas-odoo-official:20261026.1100`\n\n<!-- approval-context\nWORKFLOW_MARKER=build-image.yml\nIMAGE_TAG=20261026.1100\nIMAGE_NAME=woow-paas-docker-local/paas-odoo-official\nADDON_REF=v18.0.1.0.266\nTIMEOUT_MIN=180\n-->"
+    },
+    {
+      "number": 420,
+      "title": "[prod-approval:build-image.yml] Build woow-paas-docker-local/paas-odoo-official:20261026.0722",
+      "state": "closed",
+      "created_at": "2026-10-26T07:22:07Z",
+      "user": {
+        "login": "gitea-actions"
+      },
+      "pull_request": null,
+      "body": "## 需要 prod build 人工審核\n\n- **Image**: `woow-paas-docker-local/paas-odoo-official:20261026.0722`\n\n<!-- approval-context\nWORKFLOW_MARKER=build-image.yml\nIMAGE_TAG=20261026.0722\nIMAGE_NAME=woow-paas-docker-local/paas-odoo-official\nADDON_REF=v18.0.1.0.265\nTIMEOUT_MIN=180\n-->"
+    },
+    {
+      "number": 408,
+      "title": "[prod-approval:build-image.yml] Build woow-paas-docker-local/paas-odoo-official:20261025.1154",
+      "state": "closed",
+      "created_at": "2026-10-25T11:54:33Z",
+      "user": {
+        "login": "gitea-actions"
+      },
+      "pull_request": null,
+      "body": "## 需要 prod build 人工審核\n\n- **Image**: `woow-paas-docker-local/paas-odoo-official:20261025.1154`\n\n<!-- approval-context\nWORKFLOW_MARKER=build-image.yml\nIMAGE_TAG=20261025.1154\nIMAGE_NAME=woow-paas-docker-local/paas-odoo-official\nADDON_REF=v18.0.1.0.261\nTIMEOUT_MIN=180\n-->"
+    },
+    {
+      "number": 402,
+      "title": "[prod-approval:build-image.yml] Build woow-paas-docker-local/paas-odoo-official:20261024.1126",
+      "state": "closed",
+      "created_at": "2026-10-24T11:26:39Z",
+      "user": {
+        "login": "gitea-actions"
+      },
+      "pull_request": null,
+      "body": "## 需要 prod build 人工審核\n\n- **Image**: `woow-paas-docker-local/paas-odoo-official:20261024.1126`\n\n<!-- approval-context\nWORKFLOW_MARKER=build-image.yml\nIMAGE_TAG=20261024.1126\nIMAGE_NAME=woow-paas-docker-local/paas-odoo-official\nADDON_REF=v18.0.1.0.258\nTIMEOUT_MIN=180\n-->"
+    },
+    {
+      "number": 347,
+      "title": "[prod-approval:build-image.yml] Build woow-paas-docker-local/paas-odoo-official:20261016.0331",
+      "state": "closed",
+      "created_at": "2026-10-16T03:31:43Z",
+      "user": {
+        "login": "gitea-actions"
+      },
+      "pull_request": null,
+      "body": "## 需要 prod build 人工審核\n\n- **Image**: `woow-paas-docker-local/paas-odoo-official:20261016.0331`\n\n<!-- approval-context\nWORKFLOW_MARKER=build-image.yml\nIMAGE_TAG=20261016.0331\nIMAGE_NAME=woow-paas-docker-local/paas-odoo-official\nADDON_REF=v18.0.1.0.243\nTIMEOUT_MIN=180\n-->"
+    },
+    {
+      "number": 343,
+      "title": "[prod-approval:build-image.yml] Build woow-paas-docker-local/paas-odoo-official:20261015.1258",
+      "state": "closed",
+      "created_at": "2026-10-15T12:59:03Z",
+      "user": {
+        "login": "gitea-actions"
+      },
+      "pull_request": null,
+      "body": "## 需要 prod build 人工審核\n\n- **Image**: `woow-paas-docker-local/paas-odoo-official:20261015.1258`\n\n<!-- approval-context\nWORKFLOW_MARKER=build-image.yml\nIMAGE_TAG=20261015.1258\nIMAGE_NAME=woow-paas-docker-local/paas-odoo-official\nADDON_REF=v18.0.1.0.242\nTIMEOUT_MIN=180\n-->"
+    }
+  ]
+}

@@ -42,10 +42,14 @@ HA 和 PaaS 各自升版，結果常常不一致。例如 n8n 在 HA 已是 2.43
 schema: 1
 phase: 1                      # 0 只報告 → 1 警告＋硬規則 → 2 機器人 PR → 3 擴大
 enforcement: hard-rules       # 各邊 CI 擋什麼：report-only（都不擋）／hard-rules（只擋硬規則）／strict（任何漂移都擋）
-sources:
-  prod_platform:              # 正式站 Fleet 釘的平台版（從 CD values-prod.yaml 的註解讀 addon_ref）
+sources:                      # 正式站／staging 實際部署的平台版：CD 釘的 image → 建置核可單的 ADDON_REF
+  prod_platform:
+    label: 正式站
     repo: "gitea:woow-paas/paas-app-bundle-cd"
     file: paas-odoo-platform/values-prod.yaml
+    kind: cd_image
+    builds: {repo: "gitea:woow-paas/paas-odoo-ci", workflow: build-image.yml}
+  stg_platform: { label: staging, file: paas-odoo-platform-stg/values-stg.yaml, ... }
 products:
   <產品>:
     upstream: { image: docker.io/..., source: "github:org/repo" }
@@ -97,7 +101,7 @@ probes: { api.github.com: https://api.github.com/rate_limit }   # 只測連線�
 - `parse`：`version`（預設）、`image_ref`（`repo:tag@sha256:…`）或 `digest`（純 sha256）。
 - `compare`：`version`、`index_digest`、`platforms.<arch>`、`artifacts.<名稱>`、`identity.<名稱>`（`target.identity` 裡的 commit、build id、fork 的上游版本），或 `info`（只列參考，不比較）。
 - `match: prefix`：identity 允許短 sha（至少 7 碼）；`tag_as_version: true`：seed 映像的 tag 就是版本（例如 OpenDesign 外殼 tag＝core build id）。
-- `ref`：分支或 tag。`$prod_platform` 代表正式站平台版；`also_refs: [develop]` 會同時比 develop。
+- `ref`：分支或 tag。`$prod_platform`／`$stg_platform` 代表正式站／staging 實際部署的平台版（見下面 `drift` 的資料來源）；`also_refs: [develop]` 會同時比 develop。
 
 **只比上游身分。** add-on 版號、chart 版號、JCR 時間戳 tag 都是各邊自己的包裝，只放在 `package_version` 列參考。例如 HA EMQX 的 add-on 標 5.9.1，實際包的是上游 5.8.9；授權上限 `<5.9.0` 只看 5.8.9。
 
@@ -129,7 +133,9 @@ python3 -m unittest discover -s tests -v
 `drift` 的資料來源：
 
 - **HA**：GitHub 公開 raw；讀不到時改用 api.github.com。另外讀 Store `catalog.json`，並在 catalog 記錄的 `source_sha` 上重讀釘點，這就是「已發佈」的版本。
-- **PaaS**：Gitea API。seed 比兩個版本：正式站 CD 釘的平台 tag，以及 develop。charts 和 paas-odoo-ci 比 main。
+- **PaaS**：Gitea API。seed 比正式站實際部署的平台 tag 與 develop；charts 和 paas-odoo-ci 比 main。
+- **平台版從哪來**：`sources.<名稱>`（kind `cd_image`）讀 CD values 的 `image.repository`＋`image.tag`，再到 `builds` 的 paas-odoo-ci 建置核可單（作者 `gitea-actions`、標題 `[prod-approval:build-image.yml] Build <repository>:<tag>`）取 `approval-context` 的 `ADDON_REF`。核可後的建置就是用這組值 clone 平台、再驗 image 內 addon 版號＝clone 版號，所以它就是那顆 image 的平台版。找不到、互相矛盾、不是 `v18.x` tag → 報告寫「**未知**」，`$<名稱>` 的列標 ❔（讀不到檔或核可單是 ⚠️）、drift＝true，不退回檔頭的發版註記；註記只用來交叉比對，和建置紀錄不同時寫在備註。
+- **Gitea 的 ref 先確認存在**：Gitea 的 raw API 遇到不存在的 tag／分支會回預設分支的內容（HTTP 200），所以讀檔前先用 commits API 確認 ref 存在；不存在就當「檔案不存在」。
 - **共用檔**：比對 HA lock 記錄的 git blob 和 charts main 的 blob。
 - **連線狀況**：每個端點的連線結果會列在報告最後。
 
@@ -145,7 +151,7 @@ python3 -m unittest discover -s tests -v
 
 權杖：
 
-- 跨 repo 讀取用 org secret `CI_GITEA_TOKEN`，因為 `paas-app-bundle-cd` 是私人 repo。
+- 跨 repo 讀取用 org secret `CI_GITEA_TOKEN`，因為 `paas-app-bundle-cd`、`paas-odoo-ci`（建置核可單）是私人 repo。
 - 寫本 repo 的 issue 用每次執行自動發的 `GITEA_TOKEN`。
 - 沒有任何 workflow 會合併或核可東西。
 
@@ -274,6 +280,6 @@ python3 tools/wvtbot.py --bot propose --product litellm --version 1.105.0 --mode
 ## 已知限制
 
 - PaaS「已部署」欄目前是手動快照（`observations`，有日期，超過 14 天會警告）。改由平台自動回報列在後續工作，第 1 期仍是手動。
-- 正式站平台版只寫在 CD values 的註解裡（例如 `# 2026-10-22: addon .253（v18.0.1.0.253 → …）`）。`wvt` 取最上面一筆發版註記，並要求該註記寫到 `image.tag` 才算交叉驗證；驗不到會在報告備註，完全讀不到時退回只比 develop。
+- 平台版靠建置核可單對 image tag：staging 專用的 addon-only 建置（`build-paas-official-staging.yml`，推到 `paas-odoo-official-stg`）沒有核可單，staging 釘這種 image 時 staging 平台版是「未知」。核可單沒有 digest，所以是用 tag（建置當下時間產生）對應，digest 只顯示不驗。
 - JCR 需要憑證，本 repo 不讀 JCR。PaaS 的 digest 身分靠 seed 裡的 `tag@sha256`：JCR 鏡像用 `--preserve-digests`，與上游 digest 逐字相同。
 - YAML 子集不支援 anchor、alias、tag、多文件，也不支援「折疊字串裡再縮排」這類罕見寫法。各邊的 Chart.yaml、values.yaml、config.yaml 已驗證可正確解析。
