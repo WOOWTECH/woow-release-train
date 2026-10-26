@@ -48,6 +48,7 @@ EXTRACTORS = ("dockerfile_arg", "yaml", "json", "seed_image", "seed_field", "cat
               "dockerfile_from", "regex", "pep508", "uv_lock", "json_select", "file_sha256")
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
+FULL_COMMIT_RE = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")  # a full git object id (sha1 / sha256 repos)
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 REPO_RE = re.compile(r"^(github|gitea):[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 HARD_RULES = ("license_ceiling", "min_version", "digest", "shared_files", "exception_expired")
@@ -1664,7 +1665,7 @@ class Fetcher:
         self.timeout = timeout
         self.probes = {}  # endpoint -> {"ok": n, "errors": [...]}
         self.cache = {}
-        self.refs = {}  # (gitea repo, ref) -> resolves?
+        self.commits = {}  # (gitea repo, ref) -> the full commit sha it names | None (no such ref)
 
     def _probe(self, ep, err=None):
         pr = self.probes.setdefault(ep, {"ok": 0, "errors": []})
@@ -1710,22 +1711,31 @@ class Fetcher:
             if self.github_token:
                 hdr["Authorization"] = "Bearer " + self.github_token
             return self._get(api, hdr, endpoint="api.github.com")
-        if not SHA1_RE.match(str(ref)) and not self.ref_exists(repo, ref):
+        sha = self.resolve_commit(repo, ref)
+        if sha is None:
             return None
-        url = "%s/repos/%s/raw/%s?ref=%s" % (self.gitea_api, full, urllib.parse.quote(path), urllib.parse.quote(ref))
+        url = "%s/repos/%s/raw/%s?ref=%s" % (self.gitea_api, full, urllib.parse.quote(path), sha)
         return self._get(url, self._gitea_hdr(), endpoint="gitea")
 
-    def ref_exists(self, repo: str, ref: str) -> bool:
-        """Does a Gitea branch / tag resolve? Gitea's raw endpoint answers a ref it cannot resolve (a missing
-        tag or branch, or a short sha) with the default branch and HTTP 200 (checked 2026-10-26), so a read
-        at a missing platform tag would silently compare develop. The commits list 404s instead."""
+    def resolve_commit(self, repo: str, ref: str):
+        """The full commit sha a Gitea branch, tag or (short) sha names; None when there is no such ref.
+
+        Gitea's raw endpoint takes only a branch, a tag or a FULL sha as `ref`: anything else — a missing
+        tag or branch, or a short sha that does exist — is answered with the default branch and HTTP 200
+        (Gitea 1.27, checked 2026-10-26), so a read at a missing platform tag, or at `11b2ed8`, would
+        silently compare develop. The commits list resolves all of them (and 404s on a missing one), so
+        every Gitea read goes to raw with the full sha it resolved to; one lookup per (repo, ref) and run,
+        which also keeps every file read at a branch on the same commit."""
+        if FULL_COMMIT_RE.match(str(ref)):
+            return ref
         key = (repo, ref)
-        if key not in self.refs:
+        if key not in self.commits:
             full = repo.split(":", 1)[1]
             data = self.gitea_json("/repos/%s/commits?sha=%s&limit=1&stat=false&verification=false&files=false"
                                    % (full, urllib.parse.quote(ref, safe="")))
-            self.refs[key] = bool(data)
-        return self.refs[key]
+            sha = data[0].get("sha") if isinstance(data, list) and data and isinstance(data[0], dict) else None
+            self.commits[key] = sha if FULL_COMMIT_RE.match(str(sha or "")) else None
+        return self.commits[key]
 
     def _gitea_hdr(self):
         return {"Authorization": "token " + self.gitea_token} if self.gitea_token else {}

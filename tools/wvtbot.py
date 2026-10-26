@@ -1422,7 +1422,10 @@ class BotFetcher(wvt.Fetcher):
         if host == "github":
             st, _, body = http("https://raw.githubusercontent.com/%s/%s/%s" % (full, ref, urllib.parse.quote(path)), {})
         else:
-            st, _, body = http("%s/repos/%s/raw/%s?ref=%s" % (self.gitea_api, full, urllib.parse.quote(path), urllib.parse.quote(ref)), self._gitea_hdr())
+            sha = self.resolve_commit(repo, ref)  # raw serves the default branch for a ref it does not know (wvt.Fetcher)
+            if sha is None:
+                return None
+            st, _, body = http("%s/repos/%s/raw/%s?ref=%s" % (self.gitea_api, full, urllib.parse.quote(path), sha), self._gitea_hdr())
         if st == 404:
             return None
         if st != 200:

@@ -8,12 +8,17 @@ rows were info only, so a production seed still on the pre-all-on images would h
 import contextlib
 import datetime as dt
 import io
+import json
 import os
+import re
 import shutil
 import tempfile
 import unittest
+import urllib.parse
 
 from helpers import FIX, MANIFEST_PATH, FakeFetcher, approval_issues, fixture, manifest, write_manifest, wvt
+
+import wvtbot  # noqa: E402
 
 TODAY = dt.date(2026, 10, 26)
 CD = "gitea:woow-paas/paas-app-bundle-cd"
@@ -261,34 +266,102 @@ class McpImageLegTest(unittest.TestCase):
         self.assertIn("identity.commit：cccccccccccc ≠ 清冊 fc5fa02e3ff4", out)
 
 
-class GiteaRefTest(unittest.TestCase):
-    """Gitea's raw endpoint serves the default branch (HTTP 200) for a tag or branch it cannot resolve
-    (2026-10-26: ?ref=v18.0.1.0.999 returned develop's seed), so a wrong platform tag would compare develop."""
+SHA_258 = "11b2ed8b86c2eb97176836c74b3eb8710d98515f"   # v18.0.1.0.258 (seed: 4d90de3, before all-on)
+SHA_266 = "528df25d8711b5faca51814ad90ebdb105af0138"   # v18.0.1.0.266
+SHA_DEV = "ccbb4a053eecdad164726dcc6a185682078859ca"   # develop (seed: fc5fa02)
 
-    def fetcher(self, known_refs):
-        urls = []
+
+class FakeGiteaApi:
+    """Gitea 1.27 as it answered on 2026-10-26 (fix-woow-release-train/raw/05-gitea-ref-probe.txt):
+    commits?sha= resolves a branch, a tag, a full or a SHORT sha to the full sha and 404s a missing ref;
+    raw?ref= serves a branch, a tag or a full sha (404 for a missing full sha) and the DEFAULT branch for
+    anything else — a missing tag, or a short sha that exists."""
+
+    def __init__(self):
+        self.refs = {"develop": SHA_DEV, "v18.0.1.0.266": SHA_266, "v18.0.1.0.258": SHA_258}
+        self.files = {SHA_258: "seed at .258", SHA_266: "seed at .266", SHA_DEV: "seed at develop"}
+        self.urls = []
+
+    def resolve(self, ref):
+        if ref in self.refs:
+            return self.refs[ref]
+        hits = [s for s in self.files if len(ref) >= 7 and s.startswith(ref)]
+        return hits[0] if len(hits) == 1 else None
+
+    def __call__(self, url):
+        self.urls.append(url)
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        if "/commits?" in url:
+            sha = self.resolve(q["sha"][0])
+            return json.dumps([{"sha": sha}]) if sha else None  # 404 -> None
+        if "/raw/" in url:
+            ref = q["ref"][0]
+            if ref in self.refs:
+                return self.files[self.refs[ref]]
+            if re.fullmatch(r"[0-9a-f]{40}", ref):
+                return self.files.get(ref)
+            return self.files[self.refs["develop"]]  # the trap: Gitea's default branch, HTTP 200
+        raise AssertionError(url)
+
+
+class GiteaRefTest(unittest.TestCase):
+    """Every Gitea read resolves its ref to the full commit sha first, then reads raw at that sha: raw serves
+    the default branch for a ref it does not know (2026-10-26: ?ref=v18.0.1.0.999 and ?ref=11b2ed8 both
+    returned develop's seed), so a wrong platform tag or a short sha would compare develop."""
+
+    def fetcher(self):
+        api = FakeGiteaApi()
 
         class F(wvt.Fetcher):
             def _get(self, url, headers=None, endpoint=None):
-                urls.append(url)
-                if "/commits?sha=" in url:
-                    ref = url.split("sha=", 1)[1].split("&", 1)[0]
-                    return '[{"sha": "x"}]' if ref in known_refs else None   # 404 -> None
-                if "/raw/" in url:
-                    return "default branch content"  # what Gitea answers for any ref
-                raise AssertionError(url)
-        return F("https://gitea.example/api/v1", "t"), urls
+                return api(url)
+        return F("https://gitea.example/api/v1", "t"), api
 
     def test_missing_ref_is_not_read(self):
-        f, urls = self.fetcher({"develop", "v18.0.1.0.266"})
+        f, api = self.fetcher()
         self.assertIsNone(f.read(PLATFORM, SEED, "v18.0.1.0.999"))
-        self.assertFalse(any("/raw/" in u for u in urls))
-        self.assertEqual(f.read(PLATFORM, SEED, "v18.0.1.0.266"), "default branch content")
-        self.assertEqual(f.read(PLATFORM, "other.xml", "v18.0.1.0.266"), "default branch content")
-        self.assertEqual(sum("/commits?sha=v18.0.1.0.266" in u for u in urls), 1)  # one check per repo and ref
-        urls.clear()
-        f.read(PLATFORM, SEED, FC5)  # a full sha is never served from another ref: no check
-        self.assertEqual([u for u in urls if "/commits?" in u], [])
+        self.assertFalse(any("/raw/" in u for u in api.urls))
+
+    def test_tags_and_branches_are_read_at_their_commit(self):
+        f, api = self.fetcher()
+        self.assertEqual(f.read(PLATFORM, SEED, "v18.0.1.0.266"), "seed at .266")
+        self.assertEqual(f.read(PLATFORM, SEED, "develop"), "seed at develop")
+        raws = [u for u in api.urls if "/raw/" in u]
+        self.assertEqual([u.rsplit("ref=", 1)[1] for u in raws], [SHA_266, SHA_DEV])  # never the ref name itself
+        f.read(PLATFORM, "other.xml", "v18.0.1.0.266")
+        self.assertEqual(sum("/commits?sha=v18.0.1.0.266" in u for u in api.urls), 1)  # one lookup per repo and ref
+
+    def test_a_short_sha_reads_that_commit_not_the_default_branch(self):
+        # review 06-short-sha-probe: read(..., "11b2ed8") passed the old existence check and returned develop
+        f, api = self.fetcher()
+        for ref in (SHA_258[:7], SHA_258[:12]):
+            self.assertEqual(f.read(PLATFORM, SEED, ref), "seed at .258", ref)
+        self.assertEqual(f.resolve_commit(PLATFORM, SHA_258[:7]), SHA_258)
+        self.assertTrue(all(u.endswith("ref=" + SHA_258) for u in api.urls if "/raw/" in u))
+
+    def test_a_full_sha_needs_no_lookup(self):
+        f, api = self.fetcher()
+        self.assertEqual(f.read(PLATFORM, SEED, SHA_258), "seed at .258")
+        self.assertIsNone(f.read(PLATFORM, SEED, "0" * 40))  # a full sha that does not exist: raw 404s
+        self.assertEqual([u for u in api.urls if "/commits?" in u], [])
+
+    def test_bot_reads_bytes_at_the_resolved_commit(self):
+        f, api = self.fetcher()
+        bf = wvtbot.BotFetcher("https://gitea.example/api/v1", "t")
+        bf._get = f._get
+        seen = []
+        orig = wvtbot.http
+
+        def http(url, headers=None, **kw):
+            seen.append(url)
+            body = api(url)
+            return (200, {}, body.encode()) if body is not None else (404, {}, b"")
+        wvtbot.http = http
+        self.addCleanup(setattr, wvtbot, "http", orig)
+        self.assertEqual(bf.read_bytes(PLATFORM, SEED, SHA_258[:7]), b"seed at .258")
+        self.assertIsNone(bf.read_bytes(PLATFORM, SEED, "v18.0.1.0.999"))
+        self.assertEqual(seen, ["https://gitea.example/api/v1/repos/odoo-addons/woow_paas_platform/raw/src/data/cloud_app_templates.xml?ref="
+                                + SHA_258])
 
 
 class SourcesManifestTest(unittest.TestCase):

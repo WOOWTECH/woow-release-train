@@ -137,7 +137,7 @@ python3 -m unittest discover -s tests -v
 - **HA**：GitHub 公開 raw；讀不到時改用 api.github.com。另外讀 Store `catalog.json`，並在 catalog 記錄的 `source_sha` 上重讀釘點，這就是「已發佈」的版本。
 - **PaaS**：Gitea API。seed 比正式站實際部署的平台 tag 與 develop（PaaS MCP 映像另比 staging）；charts 和 paas-odoo-ci 比 main。
 - **平台版從哪來**：`sources.<名稱>`（kind `cd_image`）讀 CD values 的 `image.repository`＋`image.tag`，再到 `builds` 的 paas-odoo-ci 建置核可單（作者 `gitea-actions`、標題 `[prod-approval:build-image.yml] Build <repository>:<tag>`）取 `approval-context` 的 `ADDON_REF`。核可後的建置就是用這組值 clone 平台、再驗 image 內 addon 版號＝clone 版號，所以它就是那顆 image 的平台版。找不到、互相矛盾、不是 `v18.x` tag → 報告寫「**未知**」，`$<名稱>` 的列標 ❔（讀不到檔或核可單是 ⚠️）、drift＝true，不退回檔頭的發版註記；註記只用來交叉比對，和建置紀錄不同時寫在備註。
-- **Gitea 的 ref 先確認存在**：Gitea 的 raw API 遇到不存在的 tag／分支會回預設分支的內容（HTTP 200），所以讀檔前先用 commits API 確認 ref 存在；不存在就當「檔案不存在」。
+- **Gitea 的 ref 先解析成完整 commit sha**：Gitea 的 raw API 只認分支、tag 和完整 sha；不存在的 tag／分支、以及確實存在的短 sha，都會回預設分支的內容（HTTP 200）。所以讀檔前先用 commits API 把 ref 解析成完整 sha（分支、tag、短 sha 都行；不存在就當「檔案不存在」），再用這個完整 sha 讀 raw。同一次執行裡每個 repo＋ref 只查一次，同一個分支的各檔案也都讀同一個 commit。
 - **PaaS MCP 映像**（產品 `woow-mcp-server`）：8 個 MCP 範本（`cloud_app_mcp_*`）的 image tag 比清冊的 woow-mcp-server 目標 commit、digest 比目標那次建置；正式站、staging、develop 三個點都比。
 - **共用檔**：比對 HA lock 記錄的 git blob 和 charts main 的 blob。
 - **連線狀況**：每個端點的連線結果會列在報告最後。
