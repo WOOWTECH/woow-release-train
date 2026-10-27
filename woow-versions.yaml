@@ -855,20 +855,22 @@ products:
     upstream: {source: "gitea:WOOWTECH/woow-mcp-server"}
     policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
     target:
-      version: "2026.10.25.0927"    # 無語意化版號：main commit 的 UTC 日期．時分（fc5fa02＝#84 預設全開＋既有服務一次性遷移）
-      since: "2026-10-25"
-      identity: {commit: "fc5fa02e3ff48225a1a2bdc5dfc74269a57a1b6f"}
+      version: "2026.10.27.1342"    # 無語意化版號：main commit 的 UTC 日期．時分（38a9041＝#89 合併，含 #87 第三輪、#88 未設定提示、#89 後端欄位）
+      since: "2026-10-27"
+      identity: {commit: "38a9041fb44de6d8848166473facd2f443e04710"}
       artifacts:                    # jcr-prod.woowtech.io/woow-paas-docker-local/<名稱>:<commit> 的 digest
-        hermes-mcp-admin: "sha256:7020b3ad4a36c0c68beb0652f4e5a748231c1954db7f687d1d945847539fed37"
-        odoo-mcp-admin: "sha256:45eb8812195d757fee126b9159e7cfa81a035862709c33de4a5fb211ec4c55b8"
-        n8n-mcp-admin: "sha256:1591fb4e17417dea4df16342e6383fa22d3dae09c2e61e144d666de41b1b4232"
-        k8s-mcp-admin: "sha256:8f678ffb3456bd225a427a35c980bb912c35fb91833cd278726b5d29148017ca"
-        vk-mcp-admin: "sha256:0c7227cf00c0d0afa6509e11495fa96026009b82997509a82c6242070a74b892"
-        opendesign-mcp-admin: "sha256:52096266dad05ba9db48005f36421585c9fc7e2a8264d228e58ef722c44ee974"
-        litellm-mcp-admin: "sha256:4d6eb9c2e67a34d75824b58a9c08941f6a48853a6a2d6bba69b6638331ac438f"
-        nextcloud-mcp-admin: "sha256:4f9bf95bb94d6d0d8430a3ec9ad822e6b76d47ec85837ab3f60059302a1be5e1"
-      verified: "2026-10-26：woow-mcp-server main＝fc5fa02（2026-10-25T09:27:44Z）；8 個 tag@digest 與平台 seed v18.0.1.0.261、.263、.265、.266、develop 逐字相同（平台 #1995 依 main CI run 27630 的 push 輸出改釘）"
+        hermes-mcp-admin: "sha256:7a9c78d217e6e0c5d3861fa05c9fd046698943bcddfe0ca2e857cc6e20b49636"
+        odoo-mcp-admin: "sha256:9c33cca0b3b368aff094eabf6d0409ce132858105a13ec05cb1f040d2cc68bc9"
+        n8n-mcp-admin: "sha256:f26f7dae420e5486098c6b7f134445aeda47d36929a04620d6c68c723d13492a"
+        k8s-mcp-admin: "sha256:274691eff9430f1bb6865b094b71844f6ba879a86c85a74ca4789aaa64704e36"
+        vk-mcp-admin: "sha256:959aa642af4d0447b2c961941ba66b04ecdc86a10c89224d11c67efef133c650"
+        opendesign-mcp-admin: "sha256:50e2e97e6e72f14e85f572094a4d6488169deaebb07934e3546358a44af881b1"
+        litellm-mcp-admin: "sha256:1f49fd9aa3b38ce71441ec5bb2733b243d52b891030f54686ab101ac3c582ea0"
+        nextcloud-mcp-admin: "sha256:ad3e4dd18f0c642e33ce9a8cafef28aaa7012fe528c8daa54d7427910a5bfbc8"
+      verified: "2026-10-27：woow-mcp-server main＝38a9041（2026-10-27T13:42:51Z，#89 合併）；8 個 tag@digest 以 HEAD /v2/…/manifests 從 jcr-prod 讀回，與 main CI run 30718 推送紀錄逐一相同；平台 develop 已由 #2052 改釘（正式站／staging 等 18.0.1.0.274 發版；正式站服務目前是 #86 1dcabf91）"
     known_versions:
+      - {version: "2026.10.26.2304", identity: {commit: "1dcabf91baf088f4d7a445e8d34aeb55e03cfebe"}}   # #86 第二輪（平台 #2039 改釘；正式站 22 個服務 10-27 是這版）
+      - {version: "2026.10.25.0927", identity: {commit: "fc5fa02e3ff48225a1a2bdc5dfc74269a57a1b6f"}}   # #84 預設全開＋既有服務一次性遷移（平台 .261–.273）
       - {version: "2026.10.24.1055", identity: {commit: "6b91398b8377a119fe9ef3f99bad49fd6443ad42"}}   # #82 SDK 2、全開前（平台 .259、.260）
       - {version: "2026.10.24.1009", identity: {commit: "4d90de3bd26e959045973e022457331514a85330"}}   # #79 16 MiB 上限、SDK 1（平台 .258）
     legs:
