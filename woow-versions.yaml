@@ -550,16 +550,20 @@ products:
       downgrade: allowed
       hard_rules: []
     target:
-      version: "20261026.0712"      # core build id（core tag＝PaaS 外殼 tag）
-      since: "2026-10-26"
+      version: "20261029.0033"      # core build id（core tag＝PaaS 外殼 tag）
+      since: "2026-10-29"
       platforms:
-        amd64: "sha256:366e337dc7ea192526468de33ad3f2f0ce97be3ffba9b8382a0c1d9ab88b1404"   # 單一架構 manifest（不是 index）
+        amd64: "sha256:c8cd57f07adaef23b8dddbb22a8b75f97bdf8ca42c8bfbec1b284dc60ee5a4cf"   # 單一架構 manifest（不是 index）
       identity:
         upstream_version: "0.24.1"
-        fork_commit: "c8ae3900f9ff5d58f50d11f4055756f6e7f14a25"        # woow-od-v0.24.1-w2.5（原生 Paseo 入口、原子 MCP 註冊、手機操作）
+        fork_commit: "6ebc63aacc582251b8bebe42b51d3056ff3374d2"        # woow-od-v0.24.1-w2.10（HA Ingress 深層連結重新整理、Pi 自訂模型、OpenCode 設定合併；與 20261027.1127 同一顆 core）
         upstream_commit: "89e64d813bb1c7a11519b3f668f011f7017637d7"    # open-design-v0.24.1
-      verified: "2026-10-26：建置 28347 通過原生預設啟動、Paseo 與完整 MCP 容器驗收；核可單 #419、promote run 28385，crane 讀回 JCR 正式 tag 與候選 digest 相同；依原 digest 複製至 GHCR，2026-10-26T07:29Z 匿名讀回一致。"
+      verified: "2026-10-29：建置 31566（paas-odoo-ci #492 分支）通過原生預設啟動、Paseo 離線首次啟用、完整 MCP 容器驗收與 90 項 SDK；核可單 #493、promote run 31740，crane 讀回 JCR 正式 tag 與候選 digest 相同。此 core 的 digest 與 20261027.1127 完全相同（建置全命中快取）：該 digest 已於 2026-10-27 依原 digest 複製到公開 GHCR 並匿名讀回一致，HA 0.2.10 以它發版（verify_channels 15 項通過）。外殼 open-design:20261029.0033@sha256:1a7d82ce…含外掛 0.2.3；沙盒全新卷 18 項、真實 chart 斷網 9 項、原地升級與回滾皆通過。"
     known_versions:
+      - {version: "20261026.0712", platforms: {amd64: "sha256:366e337dc7ea192526468de33ad3f2f0ce97be3ffba9b8382a0c1d9ab88b1404"}}   # 上一個目標；woow-od-v0.24.1-w2.5（原生 Paseo 入口、原子 MCP 註冊、手機操作）
+      - {version: "20261026.1751", platforms: {amd64: "sha256:14601a0b5c935b09193e7217daf603f2d3dbca2d9a9f3ba6f80d2fe2a406dbe2"}}   # HA 0.2.8～0.2.9；fork w2.7
+      - {version: "20261027.0212", platforms: {amd64: "sha256:dde1a88f9c35f6588b9c61e8088dabfb8b337dddf3d4c9c998f1488bd38b3351"}}   # PaaS 範本現行外殼；fork w2.8（GHCR 上誤植為 tag 20261027.0122）
+      - {version: "20261028.1330", platforms: {amd64: "sha256:e5dacfa83af69edd762b8b3c886e8265c9750d79fef74ff95c70d068027ce14d"}}   # PaaS 已 promote（核可單 #490）；core 為重建，fork w2.10；從未進 HA、也沒有範本釘它
       - {version: "20261024.0943", platforms: {amd64: "sha256:ffbb2bd070c488d79d960ee72fb7717f43791af6a4ae1585943598ad444a76e0"}}   # HA 0.2.5～0.2.6；fork w2.4
       - {version: "20261024.0713", platforms: {amd64: "sha256:bdb9febc456e48ee264ba506192b5d6553b65d9aadb132a45703b42af23b5aa8"}}   # fork w2.3；未上線（內建外掛只在「已安裝」分頁）
       - {version: "20261018.1219", platforms: {amd64: "sha256:f349632632e0c3fa9e546da8e83f89aa60d283d473fdf47fffa5728e01cde023"}}   # HA 0.2.3～0.2.4；fork w2.2
@@ -607,7 +611,7 @@ products:
         fanout: {enabled: false, reason: "core 由 paas-odoo-ci 每次建置重建，版本由 od-source.env 決定"}
     exceptions: []
     notes:
-      - "PaaS 與 HA 外殼共用同一個不可變 open-design-core；原生 Paseo 入口與 MCP API 在核心編譯，兩端外殼另安裝共享 runtime 0.2.1，各自負責啟動與驗證邊界。"
+      - "PaaS 與 HA 外殼共用同一個不可變 open-design-core；原生 Paseo 入口與 MCP API 在核心編譯，兩端外殼另安裝共享 Paseo runtime（opendesign-paseo-plugin）：HA 0.2.10 帶 0.2.2、PaaS 外殼 20261029.0033 帶 0.2.3，HA 0.2.11 起帶 0.2.3。20261029.0033 與 20261027.1127 是同一個 core digest（只多一個 tag）；清單不允許兩個版本共用 digest，所以 HA 要用 tag 20261029.0033 才算全部一致，這需要在公開 GHCR 為同一 digest 加一個別名 tag。"
       - "PaaS 商品 seed 記錄外殼 tag/digest；PR 測試另外釘相同核心 digest。既有 deployment_policy=pinned 服務保留原版本，商品預設更新不代表所有既有服務已更新。"
 
 
