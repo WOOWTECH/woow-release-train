@@ -912,6 +912,147 @@ products:
 
 # 線上實際部署的手動快照（非真相來源，只供 drift 報告參考；第 1 期起改由 operator 回報）。
 # 本 repo 有公開鏡像：只寫數量與版本，不寫租戶的服務 ID／工作區名稱。
+
+  # ============================================================ Pi Agent × Omnigent（2026-10-29 加入）
+  # 兩個 GitHub 端 repo（外掛、root）掛在既有的 leg 上（schema 只有 ha／paas 兩條 leg）：
+  # 外掛與 HA 一起放 ha leg，root 映像放 paas leg（PaaS 映像以它為 BASE）。
+  pi-omnigent-plugin:
+    display_name: Pi Omnigent 外掛（@woowtech/pi-omnigent-plugin）
+    upstream: {source: "github:WOOWTECH/pi-omnigent-plugin"}
+    policy:
+      mode: lockstep
+      downgrade: allowed
+      min_version: "0.3.28"      # 0.3.27 會建立「Omnigent 連線設定」對話，負責人 10-27 否決（HA 0.15.14 撤回、PaaS 1347 作廢）
+      hard_rules: [min_version]
+    target:
+      version: "0.3.29"
+      since: "2026-10-28"
+      artifacts:
+        tgz: "sha256:e5bba36758870c913c773702d52d0160e3a11fa9d82eeee19c5ca51c048ec9e7"   # release asset ＝ SHA256SUMS ＝ API digest
+      identity:
+        tag_commit: "b5fcbe8a315c9d635977848fde249447c9bf0a42"   # v0.3.29 指到的 commit（＝PR #17 的 merge，也是 main HEAD）
+        ui_patch_sha256: "c5a1b94aa6547259365f2f4f49867e55722a5aef0b8e53a66f6b2b337b89d03b"
+      verified: "2026-10-29 alignment_audit.py：release tgz sha256 ＝ root／HA Dockerfile 釘值"
+    known_versions:
+      - version: "0.3.28"
+        artifacts: {tgz: "sha256:1d05349c828b1d2ff40902219036eab67dfb58e203676f56957e5c4b412e3ae4"}
+        identity: {tag_commit: "0430d0dbdaaeb6c644d75e5cd80b5412a7efb3f0"}
+      - version: "0.3.27"          # 已否決：會建立設定對話；列在這裡只為了把落後的釘點換算回版本
+        artifacts: {tgz: "sha256:28acbd22e2e2d28a3cdea76ede7ddd8e19a46779a34b2a2a6a896873a831ba53"}
+    legs:
+      ha:
+        repo: "github:WOOWTECH/Woow_ha_pi_agent_add_on"
+        ref: main
+        pins:
+          - {id: plugin-version, label: 外掛版本（Dockerfile ARG）, file: Dockerfile, kind: dockerfile_arg, name: PI_OMNIGENT_VERSION, compare: version}
+          - {id: plugin-tgz, label: 外掛 tgz sha256（Dockerfile ARG）, file: Dockerfile, kind: dockerfile_arg, name: PI_OMNIGENT_SHA256, parse: digest, compare: artifacts.tgz}
+          # bridge.mjs 是 v0.3.11 的分叉（雙路徑漂移風險）：只列參考，讓報告每天提醒「分叉基底 vs 外掛目標」
+          - {id: bridge-fork-base, label: HA bridge.mjs 分叉基底, file: rootfs/usr/local/lib/pi-omnigent-ha/bridge.mjs, kind: regex, pattern: 'adapted from pi-omnigent-plugin v([0-9.]+)', compare: info}
+          - {id: plugin-ci-repo, label: 外掛 repo 自己的版本（package.json）, repo: "github:WOOWTECH/pi-omnigent-plugin", file: package.json, kind: json, path: version, compare: version}
+        package_version:
+          - {label: add-on 版號, file: config.yaml, kind: yaml, path: version}
+        published: {kind: catalog, repo: "github:WOOWTECH/Woow_HA_App_Store", file: .addon-sync/catalog.json, id: woow_ha_pi_agent}
+        fanout: {enabled: false, reason: "外掛是自家 release：先發 release，再手動跑 apply_ha_*.py（13 個檔），bot 無法查 GitHub release asset"}
+      paas:
+        repo: "gitea:woow-paas/paas-odoo-ci"
+        ref: main
+        pins:
+          - {id: root-version, label: root 映像內的外掛版本（Dockerfile ARG）, repo: "github:WOOWTECH/Woow_k3s_pi_agent_package", file: Dockerfile, kind: dockerfile_arg, name: PI_OMNIGENT_VERSION, compare: version}
+          - {id: root-tgz, label: root 映像內的外掛 tgz sha256, repo: "github:WOOWTECH/Woow_k3s_pi_agent_package", file: Dockerfile, kind: dockerfile_arg, name: PI_OMNIGENT_SHA256, parse: digest, compare: artifacts.tgz}
+          - {id: root-ui-patch, label: root 映像的合併 UI 補丁 sha256, repo: "github:WOOWTECH/Woow_k3s_pi_agent_package", file: Dockerfile, kind: dockerfile_arg, name: PI_OMNIGENT_UI_SHA256, compare: identity.ui_patch_sha256}
+          - {id: paas-contract, label: PaaS 契約的外掛版本, file: pi-agent/tests/managed-web-contract.json, kind: json, path: omnigentVersion, compare: version}
+        package_version: []
+        fanout: {enabled: false, reason: "PaaS 要經 root 映像 → paas-odoo-ci → /approve → chart → seed，人工接力（見 pi-agent-image-chain）"}
+    exceptions: []
+    notes:
+      - "管版號與 hash 的單一來源：本項 target。root／HA／paas-odoo-ci 的 PI_OMNIGENT_* 與 managed-web-contract.json 都只是消費端；alignment_audit.py 的 UP 常數改讀這裡。"
+      - "alignment_audit.py 檢查『release asset 與 SHA256SUMS 一致、tag tree 等於檔案』仍留在 plugin repo 的 release workflow（見 ultrareview 建議）。"
+
+  omnigent-cli:
+    display_name: Omnigent CLI／SDK（PyPI omnigent；Pi 主機與 HA 用）
+    upstream: {package: "pypi:omnigent", source: "github:omnigent-ai/omnigent"}
+    policy:
+      mode: range
+      min_version: "0.16.0"        # 外掛契約與 omnigent-reminder-patch 的 EXPECTED_VERSION 都只驗到 0.16.0
+      max_days_behind: 60
+      downgrade: forbidden
+      hard_rules: []
+    target:
+      version: "0.16.0"
+      since: "2026-10-29"           # 草案日；實作時填清冊 PR 日
+      artifacts:
+        sdist: "sha256:b11a9472a4c164d456e31c259fa25b33f0c2732076a802aebb1cb6ccbf3aa658"
+        wheel: "sha256:f0fd481ef57f0e7e0a533250e450cb954a6e35bc0173e8a685bec589b5a33ff7"
+      verified: "2026-10-29 PyPI omnigent 0.16.0（2026-09-29，未撤回）；PaaS 與 HA 的 requirements.lock 兩個 hash 都等於 PyPI；PyPI 最新 0.20.0、Omnigent server 0.19.1（chart 0.1.15）"
+    legs:
+      ha:
+        repo: "github:WOOWTECH/Woow_ha_pi_agent_add_on"
+        ref: main
+        pins:
+          - {id: requirements-in, file: cli-runtime/omnigent/requirements.in, kind: regex, pattern: '(?m)^omnigent==([0-9.]+)\s*$', compare: version}
+          - {id: lock-sdist, label: lock 的第一個 hash（＝PyPI sdist）, file: cli-runtime/omnigent/requirements.lock, kind: regex, pattern: '(?m)^omnigent==[0-9.]+ \\\n\s+--hash=sha256:([0-9a-f]{64})', parse: digest, compare: artifacts.sdist}
+          - {id: dockerfile-assert, label: Dockerfile 版本斷言, file: Dockerfile, kind: regex, pattern: 'version\("omnigent"\) == "([0-9.]+)"', compare: version}
+          - {id: plugin-ci, label: 外掛 CI 的 pip install, repo: "github:WOOWTECH/pi-omnigent-plugin", file: .github/workflows/test.yml, kind: regex, pattern: 'pip install omnigent==([0-9.]+)', compare: version}
+          - {id: plugin-default, label: 外掛預設安裝版本（installer.mjs）, repo: "github:WOOWTECH/pi-omnigent-plugin", file: src/installer.mjs, kind: regex, pattern: "omnigent: '([0-9.]+)'", compare: version}
+        fanout: {enabled: false, reason: "兩邊都有 hash 鎖與版本專屬 patch，升版要人工重算（含外掛契約）"}
+      paas:
+        repo: "gitea:woow-paas/paas-odoo-ci"
+        ref: main
+        pins:
+          - {id: requirements-in, file: pi-agent/omnigent-requirements.in, kind: regex, pattern: '(?m)^omnigent==([0-9.]+)\s*$', compare: version}
+          - {id: lock-sdist, label: lock 的第一個 hash（＝PyPI sdist）, file: pi-agent/omnigent-requirements.lock, kind: regex, pattern: '(?m)^omnigent==[0-9.]+ \\\n\s+--hash=sha256:([0-9a-f]{64})', parse: digest, compare: artifacts.sdist}
+          - {id: dockerfile-arg, file: pi-agent/Dockerfile, kind: dockerfile_arg, name: OMNIGENT_VERSION, compare: version}
+          - {id: reminder-patch-gate, label: omnigent-reminder-patch 的 EXPECTED_VERSION, file: pi-agent/omnigent-reminder-patch/omnigent-reminder-patch.py, kind: regex, pattern: 'EXPECTED_VERSION = "([0-9.]+)"', compare: version}
+        fanout: {enabled: false, reason: "同 ha"}
+    exceptions: []
+    notes:
+      - "server（chart 0.1.15 的 WoowTech overlay，上游 v0.19.1）與 Pi 主機 CLI 0.16.0 差三個 minor；上游 server-compat.yml 只對 final tag 做 server×runner 兩兩矩陣，Woow overlay 與外掛契約只測 0.16.0。要升 CLI 時一次改 10+ 個檔、三個 repo，所以只做 range＋觀測。"
+
+  pi-agent-image-chain:
+    display_name: Pi Agent PaaS 映像鏈（root 映像 → paas-odoo-ci → chart → 平台 seed）
+    upstream: {image: ghcr.io/woowtech/woow-k3s-pi-agent, source: "github:WOOWTECH/Woow_k3s_pi_agent_package"}
+    policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
+    target:
+      version: "0.3.21"            # root 映像版本（含外掛 0.3.29、Paseo 0.1.14）
+      since: "2026-10-29"
+      index_digest: "sha256:ce0895df04c00885a85638e59b44b3cc852ec92bff75d99ead0f0efdeb46bb34"
+      artifacts:
+        paas_image: "sha256:7997f1db0e6e585f76677b28ba4d2496ae6264ec2b3c7779a4575f12056da2f9"   # JCR pi-agent:20261029.0606（已 promote、chart 0.1.17 已發佈，平台 .279 才帶 seed）
+      identity:
+        paas_image_tag: "20261029.0606"
+        chart_version: "0.1.17"
+      verified: "2026-10-29 alignment_audit.py（audit-receipt-1029-now.json：44 PASS／2 WARN／0 FAIL）"
+    known_versions:
+      - version: "0.3.20"          # 正式站現行（平台 .277／.278：chart 0.1.16、映像 1328）
+        index_digest: "sha256:19a50724cc64b3337781003c56811edf1297618a98efa9ee171b358523acccc6"
+        artifacts: {paas_image: "sha256:9a45d8eaf68b84c402f0673b977d7efcb101d98aaa44b0220059549bf9b5c583"}
+        identity: {paas_image_tag: "20261028.1328", chart_version: "0.1.16"}
+    legs:
+      paas:
+        repo: "gitea:woow-paas/paas-odoo-ci"
+        ref: main
+        pins:
+          - {id: base, label: PaaS 映像基底（root tag＋index digest）, file: pi-agent/Dockerfile, kind: dockerfile_arg, name: BASE, parse: image_ref, compare: index_digest}
+          - {id: chart-appversion, label: chart appVersion（＝JCR 映像 tag）, repo: "gitea:woow-paas/woow-paas-charts", ref: main, file: charts/pi-agent/Chart.yaml, kind: yaml, path: appVersion, compare: identity.paas_image_tag}
+          - {id: chart-version, label: chart 版號, repo: "gitea:woow-paas/woow-paas-charts", ref: main, file: charts/pi-agent/Chart.yaml, kind: yaml, path: version, compare: identity.chart_version}
+          - id: seed
+            label: 平台 seed 的 pi-agent 映像（tag＋digest）
+            repo: "gitea:odoo-addons/woow_paas_platform"
+            ref: $prod_platform
+            also_refs: [develop]
+            file: src/data/cloud_app_templates.xml
+            kind: seed_image
+            record: cloud_app_pi_agent
+            compare: identity.paas_image_tag
+            digest: artifacts.paas_image
+        package_version:
+          - {label: seed chart 版號, repo: "gitea:odoo-addons/woow_paas_platform", ref: $prod_platform, also_refs: [develop], file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_pi_agent, field: helm_chart_version}
+        fanout: {enabled: false, reason: "要先有 paas-odoo-ci 的 build-pi-agent-image 核可單（人工 /approve），再 chart、再 seed；機器人只開 PR 的接力未建"}
+    exceptions: []
+    notes:
+      - "目前線上 PaaS 租戶（6 台）跑 1328、正式站 seed 也是 1328；清冊目標是已 promote 的 0606：develop 的 seed 落後一版是設計內的接力狀態，不是漂移事故。"
+      - "HA add-on 不在這條鏈上（它自己的 Dockerfile 建 Pi Web 0.12.0），所以沒有 ha leg（validate 會警告一次）。"
+
 observations:
   - product: n8n
     as_of: "2026-10-16"
