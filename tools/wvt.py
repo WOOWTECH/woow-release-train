@@ -966,6 +966,24 @@ def resolve_digest(product: dict, digest: str):
     return None, None
 
 
+def target_aliases(product: dict) -> list:
+    """target.aliases: further version strings (tags) of the target's own artifact; [] when none are declared."""
+    al = (product.get("target") or {}).get("aliases")
+    return [a for a in al if isinstance(a, str)] if isinstance(al, list) else []
+
+
+def is_alias(product: dict, version) -> bool:
+    """Does `version` (as a pin shows it) name a declared alias of the target? An exact string match, a leading
+    v aside: `1.2.3-rc.1` is no alias of `1.2.3` unless it is declared."""
+    if not isinstance(version, str):
+        return False
+
+    def bare(s):
+        s = s.strip()
+        return s[1:] if re.match(r"^[vV]\d", s) else s
+    return bare(version) in {bare(a) for a in target_aliases(product)}
+
+
 def _days_between(a: str, b: _dt.date) -> int:
     return (b - _dt.date.fromisoformat(a)).days
 
@@ -1063,6 +1081,34 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
                 E("%s.policy.max_days_behind (int) required for range mode" % where)
             if not tgt.get("since"):
                 E("%s.target.since required for range mode (max_days_behind clock)" % where)
+        aliases, alias_set = tgt.get("aliases"), set()
+        if aliases is not None:  # opt-in: more version strings (tags) of the target's own artifact
+            aw = "%s.target.aliases" % where
+            if not isinstance(aliases, list):
+                E("%s must be a list of quoted version strings" % aw)
+            else:
+                known = {kv.get("version") for kv in p.get("known_versions") or [] if isinstance(kv.get("version"), str)}
+                for a in aliases:
+                    if not isinstance(a, str) or parse_version(a) is None:
+                        E("%s: %r must be a quoted version string" % (aw, a))
+                        continue
+                    if a in alias_set:
+                        E("%s: %s is listed twice" % (aw, a))
+                    alias_set.add(a)
+                    if a == tv:
+                        E("%s: %s duplicates the target version" % (aw, a))
+                    if a in known:
+                        E("%s: %s is also a known_versions version (an alias names the target's own artifact, not an older one)"
+                          % (aw, a))
+                    # a version string of this product obeys what the target version obeys, or an alias would be a way around it
+                    try:
+                        if pol.get("license_ceiling") and not satisfies(a, pol["license_ceiling"]):
+                            E("%s: %s breaks license_ceiling %s" % (aw, a, pol["license_ceiling"]))
+                    except WvtError:
+                        pass  # a bad constraint is reported with the policy above
+                    mv = pol.get("min_version")
+                    if mode == "range" and isinstance(mv, str) and (cmp_versions(a, mv) or 0) < 0:
+                        E("%s: %s is below min_version %s" % (aw, a, mv))
         seen = {}
         for kv in known_entries(p):
             label = "target" if kv.get("_is_target") else "known_versions[%s]" % kv.get("version")
@@ -1082,7 +1128,8 @@ def validate_manifest(m: dict, today: _dt.date | None = None, expiry: bool = Tru
                     continue
                 if not DIGEST_RE.match(str(d)):
                     E("%s.%s digest %r invalid" % (where, label, d))
-                if d in seen and seen[d] != label:
+                # an alias listed in known_versions is reported once, by the alias rule above, not again as a digest clash
+                if d in seen and seen[d] != label and not (isinstance(kv.get("version"), str) and kv["version"] in alias_set):
                     E("%s digest %s appears in both %s and %s" % (where, short(d), seen[d], label))
                 seen[d] = label
         legs = p.get("legs") or {}
@@ -1370,11 +1417,15 @@ def evaluate(product: dict, leg: str, pin: dict, obs: dict, today: _dt.date | No
             version = version if kv_version is None else kv_version
             findings.extend(fs)
     else:
+        alias = version if is_alias(product, version) else None
+        if alias:  # a declared alias names the target's own artifact: equal to the target, not behind or mismatching
+            version = tv
+            findings.append(finding("info", "alias", "tag %s 是清冊目標 %s 的別名（同一個產物）" % (alias, tv)))
         if compare != "version":
             want = target_value(product, compare)
             got = obs.get("digest")
             if got is None:
-                return {"status": "unknown", "version": version,
+                return {"status": "unknown", "version": alias or version,
                         "findings": [finding("unknown", "extract", "釘點沒有 digest，無法比對 %s" % compare)]}
             digest_ok = (got == want)
             if not digest_ok:
@@ -1382,7 +1433,7 @@ def evaluate(product: dict, leg: str, pin: dict, obs: dict, today: _dt.date | No
                 if rv is not None:
                     if version and version != rv:
                         findings.append(finding("mismatch", "digest",
-                                                "tag 寫 %s，但 digest 屬於 %s" % (version, rv)))
+                                                "tag 寫 %s，但 digest 屬於 %s" % (alias or version, rv)))
                     version = rv
                     if form != compare:
                         findings.append(finding("info", "digest_form",

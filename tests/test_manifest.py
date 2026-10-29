@@ -188,5 +188,75 @@ class MutationTest(unittest.TestCase):
         self.assertTrue(any("days old" in w for w in warnings))
 
 
+class AliasValidationTest(unittest.TestCase):
+    """target.aliases (opt-in): more version strings (tags) that name the target's own artifact."""
+
+    def od(self, **target):
+        m = manifest()
+        m["products"]["opendesign"]["target"].update(target)
+        return m
+
+    def assertError(self, m, needle):
+        errors, _ = validate(m)
+        self.assertTrue(any(needle in e for e in errors), "%r not in %r" % (needle, errors))
+
+    def test_aliases_validate(self):
+        for aliases in ([], ["20261017.0800"], ["20261017.0800", "20261016.0900"]):
+            self.assertEqual(validate(self.od(aliases=aliases))[0], [], aliases)
+
+    def test_a_retagged_artifact_is_recorded_as_an_alias_not_a_second_digest(self):
+        m = manifest()
+        od = m["products"]["opendesign"]
+        od["known_versions"].insert(0, {"version": "20261017.0800", "platforms": dict(od["target"]["platforms"])})
+        self.assertError(m, "appears in both target and known_versions[20261017.0800]")  # what the manifest cannot say today
+        od["known_versions"].pop(0)
+        od["target"]["aliases"] = ["20261017.0800"]
+        self.assertEqual(validate(m)[0], [])
+
+    def test_an_alias_listed_in_known_versions_is_one_error_not_a_digest_clash(self):
+        m = self.od(aliases=["20261017.0800"])
+        od = m["products"]["opendesign"]
+        od["known_versions"].insert(0, {"version": "20261017.0800", "platforms": dict(od["target"]["platforms"])})
+        errors, _ = validate(m)
+        self.assertTrue(any("also a known_versions version" in e for e in errors), errors)
+        self.assertFalse(any("appears in both" in e for e in errors), errors)
+
+    def test_only_the_alias_itself_is_exempt_from_the_digest_clash(self):
+        m = self.od(aliases=["20261017.0800"])
+        od = m["products"]["opendesign"]
+        od["known_versions"].insert(0, {"version": "20261016.0001", "platforms": dict(od["target"]["platforms"])})
+        self.assertError(m, "appears in both target and known_versions[20261016.0001]")
+
+    def test_alias_differs_from_target_and_from_known_versions(self):
+        self.assertError(self.od(aliases=["20261018.1219"]), "duplicates the target version")
+        self.assertError(self.od(aliases=["20261015.0617"]), "also a known_versions version")
+        self.assertError(self.od(aliases=["20261017.0800", "20261017.0800"]), "is listed twice")
+
+    def test_alias_is_a_quoted_version_string_in_a_list(self):
+        self.assertError(self.od(aliases="20261017.0800"), "must be a list of quoted version strings")
+        for bad in ("latest", 20261017, 5.8, {"x": "1"}):
+            self.assertError(self.od(aliases=[bad]), "must be a quoted version string")
+
+    def test_alias_obeys_the_license_ceiling_and_the_range_floor(self):
+        m = manifest()
+        m["products"]["emqx"]["target"]["aliases"] = ["5.8.8"]
+        self.assertEqual(validate(m)[0], [])
+        m["products"]["emqx"]["target"]["aliases"] = ["5.9.1"]  # a tag past the ceiling would read as the target
+        self.assertError(m, "5.9.1 breaks license_ceiling <5.9.0")
+        m = manifest()
+        m["products"]["n8n"]["target"]["aliases"] = ["2.43.5"]
+        self.assertEqual(validate(m)[0], [])
+        m["products"]["n8n"]["target"]["aliases"] = ["2.37.0"]
+        self.assertError(m, "2.37.0 is below min_version 2.38.0")
+
+    def test_products_without_aliases_validate_as_before(self):
+        self.assertEqual(validate(manifest())[0], [])
+        m = manifest()
+        m["products"]["emqx"]["target"]["aliases"] = ["5.8.8"]  # another product's aliases loosen nothing here
+        kv = m["products"]["n8n"]["known_versions"][0]
+        kv["platforms"]["amd64"] = m["products"]["n8n"]["target"]["platforms"]["amd64"]
+        self.assertError(m, "appears in both")
+
+
 if __name__ == "__main__":
     unittest.main()

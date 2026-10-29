@@ -152,6 +152,24 @@ class CheckCliTest(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn("等同步 PR", out)
 
+    def test_alias_tag_passes_the_hard_digest_rule(self):
+        # litellm's hard rule `digest`: the target digest under a second tag fails, unless the tag is declared an alias
+        tmp = self.tmpdir()
+        repo, _, m = litellm_repo(tmp)
+        _sub(os.path.join(repo, "litellm", "Dockerfile"), "litellm-non_root:1.104.0@", "litellm-non_root:1.103.9@")
+        argv = ("check", "--leg", "ha", "--repo-dir", repo, "--repo", "github:WOOWTECH/Woow_ha_litellm")
+        rc, out = run(*argv, manifest_path=write_manifest(tmp, m))
+        self.assertEqual(rc, 1, out)
+        self.assertIn("tag 寫 1.103.9，但 digest 是清冊目標 1.104.0", out)
+        m["products"]["litellm"]["target"]["aliases"] = ["1.103.9"]
+        rc, out = run(*argv, manifest_path=write_manifest(tmp, m))
+        self.assertEqual(rc, 0, out)
+        self.assertIn("1.103.9 是清冊目標 1.104.0 的別名", out)
+        m["products"]["litellm"]["target"]["aliases"] = ["1.103.9", "1.103.9"]  # an invalid manifest stops the check
+        rc, out = run(*argv, manifest_path=write_manifest(tmp, m))
+        self.assertEqual(rc, 2, out)
+        self.assertIn("is listed twice", out)
+
     def test_missing_lock_fails_closed(self):
         repo, mpath, _ = litellm_repo(self.tmpdir())
         os.remove(os.path.join(repo, "litellm", "woow-plugin.lock.json"))
