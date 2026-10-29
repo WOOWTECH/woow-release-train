@@ -548,7 +548,7 @@ products:
     policy:
       mode: lockstep
       downgrade: allowed
-      hard_rules: []
+      hard_rules: [digest]          # core digest（HA、PR 測試）與外殼 digest（seed）不符就擋；tag 落後、identity 不符仍只警告。清冊要比 HA／PaaS 先合
     target:
       version: "20261029.0033"      # core build id（core tag＝PaaS 外殼 tag）
       since: "2026-10-29"
