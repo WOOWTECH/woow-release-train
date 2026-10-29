@@ -512,6 +512,53 @@ class FanoutTest(unittest.TestCase):
         self.assertEqual([x["status"] for x in fs], ["ok"], fs)
 
 
+class AliasBotTest(unittest.TestCase):
+    """target.aliases never reaches the bots as a value: they write target.version and the target digests only."""
+
+    def aliased(self, *aliases):
+        m = manifest()
+        m["products"]["n8n"]["target"]["aliases"] = list(aliases)
+        return m
+
+    def ha_dockerfile(self, version):
+        df = fixture("ha_n8n", "n8n", "Dockerfile").replace("N8N_UPSTREAM_VERSION=2.43.6", "N8N_UPSTREAM_VERSION=" + version)
+        return FakeFetcher(overrides={("github:WOOWTECH/Woow_ha_n8n", "n8n/Dockerfile", "main"): df})
+
+    def n8n_plans(self, plans):
+        return [p for p in plans if p["product"] == "n8n"]
+
+    def test_a_pin_on_an_alias_is_never_proposed_as_the_new_target(self):
+        f = self.ha_dockerfile("2.44.0")
+        reg = FakeRegistry({("docker.io/n8nio/n8n", "2.44.0"): N8N_244})
+        m = manifest()
+        self.assertEqual([p["version"] for p in self.n8n_plans(wvtbot.plan_propose(m, wvt.collect_drift(m, f, TODAY), f, reg, TODAY))],
+                         ["2.44.0"])  # without the alias this pin is ahead and becomes the proposal
+        m = self.aliased("2.44.0")  # declared as another tag of 2.43.6: aligned, so not ahead
+        self.assertEqual(self.n8n_plans(wvtbot.plan_propose(m, wvt.collect_drift(m, f, TODAY), f, reg, TODAY)), [])
+
+    def test_fanout_writes_the_target_never_an_alias(self):
+        m = self.aliased("2.43.5")
+        f = self.ha_dockerfile("2.43.5")  # on the alias: aligned, nothing to write
+        self.assertEqual(self.n8n_plans(wvtbot.plan_fanout(m, f, TODAY, "ha")), [])
+        f = self.ha_dockerfile("2.38.0")  # behind: the PR writes the target version, not the alias
+        plan = self.n8n_plans(wvtbot.plan_fanout(m, f, TODAY, "ha"))[0]
+        self.assertEqual(wvt.extract_dockerfile_arg(plan["files"]["n8n/Dockerfile"], "N8N_UPSTREAM_VERSION"), "2.43.6")
+        pin = next(p for p in wvt.iter_pins(m["products"]["n8n"], "ha") if p["id"] == "upstream")
+        self.assertEqual(wvtbot.desired_value(m["products"]["n8n"], pin, {"raw": "2.43.5"}), "2.43.6")
+
+    def test_moving_the_target_leaves_the_aliases_with_the_old_target(self):
+        text = manifest_text()
+        marker = '      since: "2026-10-15"         # HA add-on 2.43.6 發佈日\n'
+        self.assertEqual(text.count(marker), 1)
+        text = text.replace(marker, marker + '      aliases: ["2.43.5"]\n')
+        new = dict(version="2.44.0", since="2026-10-24", verified="test", **N8N_244)
+        n8n = wvtbot.check_manifest_text(wvtbot.set_target(text, "n8n", new), TODAY)["products"]["n8n"]
+        self.assertNotIn("aliases", n8n["target"])  # the new target is another artifact: no aliases carried over
+        self.assertEqual(n8n["known_versions"][0]["aliases"], ["2.43.5"])  # the old block moves as it is (inert there)
+        reg = FakeRegistry({("docker.io/n8nio/n8n", "2.44.0"): N8N_244})
+        self.assertNotIn("aliases", wvtbot.new_target_for(self.aliased("2.43.5")["products"]["n8n"], "2.44.0", TODAY, reg))
+
+
 class StampsTest(unittest.TestCase):
     def test_resync_rewrites_stamps_and_version_spots(self):
         names = ["sitecustomize.py", "woow_chatgpt.py", "woow_chatgpt_plugin.py", "woow_usage_limit.py"]

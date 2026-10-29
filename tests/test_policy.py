@@ -159,6 +159,88 @@ class RangeTest(unittest.TestCase):
         self.assertEqual(res["status"], "unknown")
 
 
+class AliasEvaluateTest(unittest.TestCase):
+    """target.aliases: a pin on another tag of the target's own artifact is the target, not behind or mismatching."""
+
+    def setUp(self):
+        self.od = manifest()["products"]["opendesign"]
+        self.tv = self.od["target"]["version"]
+        self.digest = self.od["target"]["platforms"]["amd64"]
+        self.img = {"kind": "dockerfile_arg", "parse": "image_ref", "compare": "platforms.amd64"}  # tag + digest pin
+        self.tag = {"kind": "yaml", "parse": "image_ref", "compare": "version"}                     # tag-only pin
+
+    def ref(self, tag, digest=None):
+        return "ghcr.io/woowtech/open-design-core:%s@%s" % (tag, digest or self.digest)
+
+    def ev(self, pin, raw, product=None):
+        return ev(product or self.od, "ha", pin, wvt.observe(pin, raw))
+
+    def blocks(self, res):
+        return any(wvt.blocking(self.od, f, "violation") for f in res["findings"])
+
+    def test_without_the_alias_a_second_tag_is_not_the_target(self):
+        res = self.ev(self.img, self.ref("20261017.0800"))
+        self.assertEqual(res["status"], "mismatch")
+        self.assertIn("tag 寫 20261017.0800，但 digest 是清冊目標", res["findings"][0]["message"])
+        self.assertEqual(self.ev(self.tag, self.ref("20261017.0800"))["status"], "behind")
+
+    def test_alias_tag_with_the_target_digest_is_aligned(self):
+        self.od["target"]["aliases"] = ["20261017.0800"]
+        res = self.ev(self.img, self.ref("20261017.0800"))
+        self.assertEqual((res["status"], res["version"]), ("ok", self.tv))
+        self.assertEqual(rules(res), ["alias"])  # said once, as information
+        self.assertEqual(statuses(res), ["info"])
+        res = self.ev(self.tag, self.ref("20261017.0800"))
+        self.assertEqual((res["status"], res["version"]), ("ok", self.tv))
+
+    def test_alias_does_not_excuse_a_wrong_digest(self):
+        self.od["target"]["aliases"] = ["20261017.0800"]
+        res = self.ev(self.img, self.ref("20261017.0800", "sha256:" + "0" * 64))
+        self.assertEqual(res["status"], "mismatch")
+        self.assertIn("digest", rules(res))
+        old = self.od["known_versions"][0]  # the digest of an older version: named by the tag the pin shows
+        res = self.ev(self.img, self.ref("20261017.0800", old["platforms"]["amd64"]))
+        self.assertIn("tag 寫 20261017.0800，但 digest 屬於 %s" % old["version"], [f["message"] for f in res["findings"]])
+        self.assertEqual((res["status"], res["version"]), ("mismatch", old["version"]))
+
+    def test_only_a_declared_alias_counts(self):
+        self.od["target"]["aliases"] = ["20261017.0800"]
+        plain = dict(self.tag, parse="version")
+        self.assertEqual(self.ev(self.tag, self.ref("20261017.0801"))["status"], "behind")
+        self.assertEqual(self.ev(plain, "20261017.0800-rc.1")["status"], "behind")  # a suffix is no alias
+        self.assertEqual(self.ev(plain, "v20261017.0800")["status"], "ok")          # one leading v is tolerated
+
+    def test_absent_empty_or_other_aliases_change_nothing(self):
+        for aliases in (None, [], ["20261016.0001"]):
+            od = manifest()["products"]["opendesign"]
+            if aliases is not None:
+                od["target"]["aliases"] = aliases
+            res = self.ev(self.img, self.ref("20261017.0800"), od)
+            self.assertEqual((res["status"], rules(res)), ("mismatch", ["digest"]), aliases)
+
+    def test_alias_lifts_the_hard_digest_rule_only_for_the_right_digest(self):
+        self.od["policy"]["hard_rules"] = ["digest"]
+        self.assertTrue(self.blocks(self.ev(self.img, self.ref("20261017.0800"))))
+        self.od["target"]["aliases"] = ["20261017.0800"]
+        self.assertFalse(self.blocks(self.ev(self.img, self.ref("20261017.0800"))))
+        self.assertTrue(self.blocks(self.ev(self.img, self.ref("20261017.0800", "sha256:" + "0" * 64))))
+
+    def test_range_product_alias_is_not_behind(self):
+        n8n = manifest()["products"]["n8n"]
+        pin, late = {"compare": "version"}, dt.date(2026, 11, 20)  # long past max_days_behind
+        obs = {"raw": "2.43.5", "version": "2.43.5"}
+        self.assertEqual(ev(n8n, "ha", pin, obs, today=late)["status"], "violation")
+        n8n["target"]["aliases"] = ["2.43.5"]
+        res = ev(n8n, "ha", pin, obs, today=late)
+        self.assertEqual((res["status"], res["version"]), ("ok", "2.43.6"))
+
+    def test_identity_pins_compare_their_own_value(self):
+        self.od["target"]["aliases"] = ["0.23.1"]
+        pin = {"compare": "identity.upstream_version", "kind": "yaml"}
+        self.assertEqual(self.ev(pin, "0.23.1")["status"], "behind")
+        self.assertEqual(self.ev(pin, "0.24.1")["status"], "ok")
+
+
 class ExceptionTest(unittest.TestCase):
     def setUp(self):
         self.p = manifest()["products"]["n8n"]

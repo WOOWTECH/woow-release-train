@@ -65,6 +65,7 @@ products:
       index_digest: "sha256:..."
       platforms: { amd64: "sha256:...", arm64: "sha256:..." }
       artifacts: { <名稱>: "sha256:..." }   # 非映像的上游產物，例如 tarball
+      aliases: ["<tag>", ...]       # 選填：同一個產物的其他版本字串（tag），見下面「別名」
     known_versions: [...]           # 舊版的 digest，用來把「落後的 digest」換算回版本
     shared_files:                   # 共用檔（例如 LiteLLM Woow 外掛）：來源 commit＋blob、各邊 lock
       - source: { leg: paas, repo: ..., path: ..., commit: "<40 hex>", files: [...], blobs: { <檔名>: "<git blob>" } }
@@ -105,6 +106,14 @@ probes: { api.github.com: https://api.github.com/rate_limit }   # 只測連線�
 - `history: "gitea:OWNER/REPO"`（identity 釘點用）：commit 不是目標、`known_versions` 也沒記（`known_versions[].identity`）時，`drift` 問 Gitea 先後——目標之前的 commit＝落後 🟠、之後＝領先 🔵（清冊要跟上）、分岔或不存在＝不符 🔴。離線的 `check` 不問，一律「不符」。
 - `coverage`（leg 層級，選填）：seed 裡 `helm_default_values` 的 `image.repository` 符合 `image`（regex）的 record，都必須是這一邊的 `seed_image` 釘點，或寫在 `exclude` 並附理由；沒釘也沒排除的新範本，在 `drift`（每個比對點）與 `check`（平台 PR）都是 ❔。woow-mcp-server 用它抓「新增的 `*-mcp-admin` 範本」，`cloud_app_mcp_odoo_manage` 寫在 exclude（映像凍結在 d5032a72）。
 - `ref`：分支或 tag。`$prod_platform`／`$stg_platform` 代表 CD 釘給正式站／staging 的平台版（CD main 釘的 image 的平台版，不是 Fleet 實際套用的結果；見下面 `drift` 的資料來源）；`also_refs: [$stg_platform, develop]` 會同時比這些點。
+
+**別名（`target.aliases`，選填）。** 同一顆 digest 被打上第二個版本字串時（例如 OpenDesign 核心內容沒變、重建後換了 build id），把那個字串寫進 `target.aliases: ["<tag>"]`，不要為它另開 `known_versions` 條目：清冊不允許同一顆 digest 掛在兩個版本下，所以過去只能再去 registry 加別名 tag。
+
+- 釘點的版本字串等於別名時，視同目標：`version` 比對不算落後、`index_digest`／`platforms`／`artifacts` 比對不再因為 tag 不同而「不符」，報告多一行 `[alias]` 參考。比對是字串完全相等（開頭的 `v` 除外），`1.2.3-rc.1` 不會因為宣告了 `1.2.3` 就算別名。
+- 別名不豁免 digest：別名 tag 掛了別顆 digest 仍是「不符」（有硬規則 `digest` 就擋）。`identity.*` 釘點只比自己的 identity 值，不看別名。
+- `validate` 會擋：別名不是版本字串、重複、等於 `target.version`、已經是 `known_versions` 的版本（別名是目標自己的另一個名字，不是舊版）；也要符合該產品的 `license_ceiling`，range 產品不得低於 `min_version`，否則等於用別名繞過硬規則。沒有 `aliases` 的產品行為完全不變。
+- 機器人（`wvtbot`）不認別名：目標和釘點的新值永遠取 `target.version` 與目標 digest，不會寫入別名；釘在別名上的邊算對齊，不提案、不開 PR。propose 換目標時，舊目標區塊（含 `aliases`）照原樣搬進 `known_versions`，在那裡不起作用，新目標不帶別名。
+- 舊版 `wvt` 不認識這個欄位：驗證時直接忽略，不會報錯；但也不會把別名當目標，釘在別名 tag 上的邊在舊版仍判「不符」。
 
 **只比上游身分。** add-on 版號、chart 版號、JCR 時間戳 tag 都是各邊自己的包裝，只放在 `package_version` 列參考。例如 HA EMQX 的 add-on 標 5.9.1，實際包的是上游 5.8.9；授權上限 `<5.9.0` 只看 5.8.9。
 
