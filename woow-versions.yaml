@@ -616,7 +616,7 @@ products:
         fanout: {enabled: false, reason: "core 由 paas-odoo-ci 每次建置重建，版本由 od-source.env 決定"}
     exceptions: []
     notes:
-      - "PaaS 與 HA 外殼共用同一個不可變 open-design-core；原生 Paseo 入口與 MCP API 在核心編譯，兩端外殼另安裝共享 Paseo runtime（opendesign-paseo-plugin）：HA 0.2.10 帶 0.2.2、PaaS 外殼 20261029.0033 帶 0.2.3，HA 0.2.11 起帶 0.2.3。20261029.0033 與 20261027.1127 是同一個 core digest（只多一個 tag）；清單不允許兩個版本共用 digest，所以 HA 要用 tag 20261029.0033 才算全部一致，這需要在公開 GHCR 為同一 digest 加一個別名 tag。"
+      - "PaaS 與 HA 外殼共用同一個不可變 open-design-core；原生 Paseo 入口與 MCP API 在核心編譯，兩端外殼另安裝共享 Paseo runtime（opendesign-paseo-plugin）：HA 0.2.10 帶 0.2.2、PaaS 外殼 20261029.0033 帶 0.2.3，HA 0.2.11 起帶 0.2.3。20261029.0033 與 20261027.1127 是同一個 core digest（只多一個 tag）；清單不允許兩個版本共用 digest，所以只記 20261029.0033；HA 0.2.11 起 Dockerfile／build.yml／build.yaml 都改釘這個 tag（digest 不變），公開 GHCR 需有同一 digest 的別名 tag。"
       - "PaaS 商品 seed 記錄外殼 tag/digest；PR 測試另外釘相同核心 digest。既有 deployment_policy=pinned 服務保留原版本，商品預設更新不代表所有既有服務已更新。"
 
 
