@@ -944,8 +944,9 @@ products:
         repo: "github:WOOWTECH/Woow_ha_pi_agent_add_on"
         ref: main
         pins:
-          - {id: plugin-version, label: 外掛版本（Dockerfile ARG）, file: Dockerfile, kind: dockerfile_arg, name: PI_OMNIGENT_VERSION, compare: version}
-          - {id: plugin-tgz, label: 外掛 tgz sha256（Dockerfile ARG）, file: Dockerfile, kind: dockerfile_arg, name: PI_OMNIGENT_SHA256, parse: digest, compare: artifacts.tgz}
+          # HA add-on 的單一版本來源：Dockerfile（pins 階段）、CI 與測試都讀 cli-runtime/versions.json
+          - {id: plugin-version, label: 外掛版本（cli-runtime/versions.json）, file: cli-runtime/versions.json, kind: json, path: omnigentPlugin.version, compare: version}
+          - {id: plugin-tgz, label: 外掛 tgz sha256（cli-runtime/versions.json）, file: cli-runtime/versions.json, kind: json, path: omnigentPlugin.sha256, parse: digest, compare: artifacts.tgz}
           # bridge.mjs 是 v0.3.11 的分叉（雙路徑漂移風險）：只列參考，讓報告每天提醒「分叉基底 vs 外掛目標」
           - {id: bridge-fork-base, label: HA bridge.mjs 分叉基底, file: rootfs/usr/local/lib/pi-omnigent-ha/bridge.mjs, kind: regex, pattern: 'adapted from pi-omnigent-plugin v([0-9.]+)', compare: info}
           - {id: plugin-ci-repo, label: 外掛 repo 自己的版本（package.json）, repo: "github:WOOWTECH/pi-omnigent-plugin", file: package.json, kind: json, path: version, compare: version}
@@ -965,7 +966,7 @@ products:
         fanout: {enabled: false, reason: "PaaS 要經 root 映像 → paas-odoo-ci → /approve → chart → seed，人工接力（見 pi-agent-image-chain）"}
     exceptions: []
     notes:
-      - "管版號與 hash 的單一來源：本項 target。root／HA／paas-odoo-ci 的 PI_OMNIGENT_* 與 managed-web-contract.json 都只是消費端；alignment_audit.py 的 UP 常數改讀這裡。"
+      - "管版號與 hash 的單一來源：本項 target。root／paas-odoo-ci 的 PI_OMNIGENT_*、HA 的 cli-runtime/versions.json 與 managed-web-contract.json 都只是消費端；alignment_audit.py 的 UP 常數改讀這裡。"
       - "alignment_audit.py 檢查『release asset 與 SHA256SUMS 一致、tag tree 等於檔案』仍留在 plugin repo 的 release workflow（見 ultrareview 建議）。"
 
   omnigent-cli:
@@ -991,7 +992,7 @@ products:
         pins:
           - {id: requirements-in, file: cli-runtime/omnigent/requirements.in, kind: regex, pattern: '(?m)^omnigent==([0-9.]+)\s*$', compare: version}
           - {id: lock-sdist, label: lock 的第一個 hash（＝PyPI sdist）, file: cli-runtime/omnigent/requirements.lock, kind: regex, pattern: '(?m)^omnigent==[0-9.]+ \\\n\s+--hash=sha256:([0-9a-f]{64})', parse: digest, compare: artifacts.sdist}
-          - {id: dockerfile-assert, label: Dockerfile 版本斷言, file: Dockerfile, kind: regex, pattern: 'version\("omnigent"\) == "([0-9.]+)"', compare: version}
+          - {id: versions-json, label: 映像的 CLI 版本（cli-runtime/versions.json；Dockerfile 與 image smoke 都讀它）, file: cli-runtime/versions.json, kind: json, path: omnigent.version, compare: version}
           - {id: plugin-ci, label: 外掛 CI 的 pip install, repo: "github:WOOWTECH/pi-omnigent-plugin", file: .github/workflows/test.yml, kind: regex, pattern: 'pip install omnigent==([0-9.]+)', compare: version}
           - {id: plugin-default, label: 外掛預設安裝版本（installer.mjs）, repo: "github:WOOWTECH/pi-omnigent-plugin", file: src/installer.mjs, kind: regex, pattern: "omnigent: '([0-9.]+)'", compare: version}
         fanout: {enabled: false, reason: "兩邊都有 hash 鎖與版本專屬 patch，升版要人工重算（含外掛契約）"}
