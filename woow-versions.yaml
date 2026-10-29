@@ -554,7 +554,11 @@ products:
       since: "2026-10-29"
       platforms:
         amd64: "sha256:c8cd57f07adaef23b8dddbb22a8b75f97bdf8ca42c8bfbec1b284dc60ee5a4cf"   # 單一架構 manifest（不是 index）
+      artifacts:                    # core 之外要對上的產物
+        od_shell: "sha256:1a7d82cedbb3f49b6069eed106e8bb568dde7753643bc1ad18dacda621f960f0"       # jcr-prod.woowtech.io/woow-paas-docker-local/open-design:20261029.0033 的 digest（PaaS 外殼，含外掛 0.2.3）
+        paseo_plugin: "sha256:d251711d19215e03a13334319207f602c5d23c27f74dffa5a8d0003351ad4ab3"   # opendesign-paseo-plugin v0.2.3 的 npm 壓縮檔（package.tgz）sha256；PaaS SOURCE.json／HA VENDOR.json 各存一份，尚未有釘點
       identity:
+        build_id: "20261029.0033"                                      # ＝version；shell-tag 釘點靠它帶 digest（只有 identity 釘點能帶 digest:）
         upstream_version: "0.24.1"
         fork_commit: "6ebc63aacc582251b8bebe42b51d3056ff3374d2"        # woow-od-v0.24.1-w2.10（HA Ingress 深層連結重新整理、Pi 自訂模型、OpenCode 設定合併；與 20261027.1127 同一顆 core）
         upstream_commit: "89e64d813bb1c7a11519b3f668f011f7017637d7"    # open-design-v0.24.1
@@ -585,7 +589,7 @@ products:
       paas:
         pins:
           - id: shell-tag
-            label: seed 外殼映像 tag（＝同一次建置的 core tag）
+            label: seed 外殼映像 tag＋digest（tag＝同一次建置的 core tag）
             repo: "gitea:odoo-addons/woow_paas_platform"
             ref: $prod_platform
             also_refs: [develop]
@@ -593,7 +597,8 @@ products:
             kind: seed_image
             record: cloud_app_opendesign
             tag_as_version: true
-            compare: version
+            compare: identity.build_id    # tag 比 build id；tag 對了，digest 還要是清冊記的那次外殼建置
+            digest: artifacts.od_shell
           - {id: test-core, label: PR 容器測試核心, repo: "gitea:woow-paas/paas-odoo-ci", ref: main, file: .gitea/workflows/test-open-design-mcp.yml, kind: yaml, path: jobs.mcp-e2e.env.TEST_CORE, parse: image_ref, compare: platforms.amd64}
           - {id: fork-commit, label: fork commit（od-source.env）, repo: "gitea:woow-paas/paas-odoo-ci", ref: main, file: open-design/od-source.env, kind: regex, pattern: '^OD_SOURCE_SHA=([0-9a-f]{40})\s*$', compare: identity.fork_commit}
           - {id: upstream-version, label: 上游 OpenDesign 版本（od-source.env）, repo: "gitea:woow-paas/paas-odoo-ci", ref: main, file: open-design/od-source.env, kind: regex, pattern: '^OD_UPSTREAM_VERSION=(\S+)\s*$', compare: identity.upstream_version}
@@ -611,7 +616,7 @@ products:
         fanout: {enabled: false, reason: "core 由 paas-odoo-ci 每次建置重建，版本由 od-source.env 決定"}
     exceptions: []
     notes:
-      - "PaaS 與 HA 外殼共用同一個不可變 open-design-core；原生 Paseo 入口與 MCP API 在核心編譯，兩端外殼另安裝共享 Paseo runtime（opendesign-paseo-plugin）：HA 0.2.10 帶 0.2.2、PaaS 外殼 20261029.0033 帶 0.2.3，HA 0.2.11 起帶 0.2.3。20261029.0033 與 20261027.1127 是同一個 core digest（只多一個 tag）；清單不允許兩個版本共用 digest，所以 HA 要用 tag 20261029.0033 才算全部一致，這需要在公開 GHCR 為同一 digest 加一個別名 tag。"
+      - "PaaS 與 HA 外殼共用同一個不可變 open-design-core；原生 Paseo 入口與 MCP API 在核心編譯，兩端外殼另安裝共享 Paseo runtime（opendesign-paseo-plugin）：HA 0.2.10 帶 0.2.2、PaaS 外殼 20261029.0033 帶 0.2.3，HA 0.2.11 起帶 0.2.3。20261029.0033 與 20261027.1127 是同一個 core digest（只多一個 tag）；清單不允許兩個版本共用 digest，所以只記 20261029.0033；HA 0.2.11 起 Dockerfile／build.yml／build.yaml 都改釘這個 tag（digest 不變），公開 GHCR 需有同一 digest 的別名 tag。"
       - "PaaS 商品 seed 記錄外殼 tag/digest；PR 測試另外釘相同核心 digest。既有 deployment_policy=pinned 服務保留原版本，商品預設更新不代表所有既有服務已更新。"
 
 
