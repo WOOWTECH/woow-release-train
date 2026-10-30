@@ -790,10 +790,14 @@ products:
     upstream: {source: "github:WOOWTECH/Woow_nextcloud_mcp_server"}
     policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
     target:
-      version: "0.1.5"
-      since: "2026-10-08"
-      identity: {source_commit: "4e09c86f8ee66f147a2d227e7ed1eb9d989394a6"}   # tag v0.1.5＝來源 main
-      verified: "2026-10-24 來源 repo main＝tag v0.1.5＝4e09c86"
+      version: "0.1.6"
+      since: "2026-10-30"
+      identity: {source_commit: "8aa6be3d034509e43b4501c1d3da1523f6a299e5"}   # tag v0.1.6（annotated fa0ed70）→ 8aa6be3＝上游 PR #2 的 head；PR 以 merge commit 4000a52 合併，樹與 8aa6be3 相同
+      verified: "2026-10-30 GitHub API：WOOWTECH/Woow_nextcloud_mcp_server tag v0.1.6^{}＝8aa6be3（PR #2 已合併，main 4000a52 與 8aa6be3 無檔案差異）；src/nextcloud_mcp_server/__init__.py 是 0.1.6；CI 5 項（lint、Python 3.11／3.13 測試、授權檢查、建置）全過"
+    known_versions:
+      - version: "0.1.5"
+        identity: {source_commit: "4e09c86f8ee66f147a2d227e7ed1eb9d989394a6"}   # tag v0.1.5＝來源 main
+        verified: "2026-10-24 來源 repo main＝tag v0.1.5＝4e09c86"
     legs:
       ha:
         fanout: {enabled: false, reason: "兩邊都對上游打版本專屬 patch／鎖檔，升版要人工重算"}
@@ -815,6 +819,8 @@ products:
     exceptions: []
     notes:
       - "2026-10-24 PaaS woow-mcp-server #74 重新 vendor 到 0.1.5（apps/nextcloud/scripts/sync_vendor.sh，VENDORED.md 記載），兩邊一致。HA 另改 4 個檔（client／server／errors／webdav，runtime-sources.json 記載），屬包裝差異。"
+      - "2026-10-30 目標改成上游 v0.1.6（上游 PR #2，憑證遮罩集中為 errors.mask_credentials）：PaaS 與 HA 都改 vendor v0.1.6（此前 PaaS vendor 的是 main 的 159410a、HA 是 v0.1.5 加自己的遮罩修補）；HA 仍有包裝差異（以 runtime-sources.json 為準），不比較。"
+      - "2026-10-30 PaaS 改 vendor 的 PR＝woow-mcp-server #96；HA＝Woow_ha_mcp_addons #41（只改原始碼，隨下一次 add-on 發版，0.4.7 由 #40 準備中）。HA 發版前 HA 腿顯示落後 v0.1.5 屬預期。"
 
   # 橫跨五個 Python MCP child 的安全下限：PaaS 2026-10-16 起把 mcp 下限設為 1.30.0（GHSA-84m7-p3x7-pcfv；
   # woow-mcp-server docs/security/dependency-pins.md:10、pyproject.toml:23），HA 五個 child 仍是 1.28.1。
