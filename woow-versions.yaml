@@ -872,7 +872,8 @@ products:
     target:
       version: "2026.10.30.0708"
       since: "2026-10-30"
-      identity: {commit: "b2eec04ba3e22b84fe453a4948450cb162a0fda5"}
+      # 八個共用來源映像與獨立的 EMQX 既有映像分別比對，不宣稱同一建置。
+      identity: {commit: "b2eec04ba3e22b84fe453a4948450cb162a0fda5", emqx_commit: "b5ed89ca01acfc33a7ef57987f0f64a11f603ea3"}
       artifacts:
         hermes-mcp-admin: "sha256:5353b124f970ddce2e2283bac56e8f7bc7e5f9bcc3181387c687ac252595c156"
         odoo-mcp-admin: "sha256:aacc8e9d631f5efcfa2c63ab20180312ae5077b0ffc739d4bde9040407377d39"
@@ -882,6 +883,7 @@ products:
         opendesign-mcp-admin: "sha256:2800cbbe04e3e8e587e5ed7d16f8dd6a4f200eb9540d2bef2a0f13d6d29986a5"
         litellm-mcp-admin: "sha256:c07db1ce1947e59621e6f862514b193236c1fd40e3d04185573ee556c5835470"
         nextcloud-mcp-admin: "sha256:cd84b60a9cd942c2c440103910a23816e52b3a2a3c21be6502aaeade0fba591a"
+        emqx-mcp-admin: "sha256:f60858334f11147675a0071b5caf699692ccf31fb493347da5d856bf9a8828dc"
       verified: "一般 main CI 八映像發布及 registry manifest/config 核對完成；來源包含 Nextcloud 0.1.6／PR96 與 G11；消費證據 SHA256 298a1c0dbabf84f69deb7d5b788aaaff287ccfcef22199965cbcc6404096ac04。僅更新目標，未宣稱正式站已部署。"
     known_versions:
       - version: "2026.10.27.1342"    # 無語意化版號：main commit 的 UTC 日期．時分（38a9041＝#89 合併，含 #87 第三輪、#88 未設定提示、#89 後端欄位）
@@ -915,12 +917,13 @@ products:
           - {id: opendesign, label: seed MCP 映像 opendesign-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_opendesign, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.opendesign-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
           - {id: litellm, label: seed MCP 映像 litellm-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_litellm, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.litellm-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
           - {id: nextcloud, label: seed MCP 映像 nextcloud-mcp-admin, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_nextcloud, also_refs: [$stg_platform, develop], compare: identity.commit, match: prefix, digest: artifacts.nextcloud-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
+          - {id: emqx, label: seed MCP 映像 emqx-mcp-admin（獨立來源）, file: src/data/cloud_app_templates.xml, kind: seed_image, record: cloud_app_mcp_emqx, also_refs: [$stg_platform, develop], compare: identity.emqx_commit, match: prefix, digest: artifacts.emqx-mcp-admin, history: "gitea:WOOWTECH/woow-mcp-server"}
         coverage:   # seed 裡 image 是 *-mcp-admin 的範本都要在上面釘，或在 exclude 寫明為什麼不追；新範本沒釘 → ❔（drift 與平台 PR 的 check 都看）
           file: src/data/cloud_app_templates.xml
           image: '-mcp-admin$'
           exclude:
             cloud_app_mcp_odoo_manage: "odoo-manage 已移出 workspace，映像凍結在 d5032a72（chart 0.1.5、is_hidden）；10-25 正式站 26 個 MCP 服務沒有一個用它。要再上架先改釘 woow-mcp-server 的建置、再加進 pins"
-        package_version:   # 8 個範本的 chart 版號（mcp-server chart，包裝，只列參考）
+        package_version:   # 九個 MCP 範本的 chart 版號（包裝，只列參考）
           - {label: seed chart 版號（hermes）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_hermes, field: helm_chart_version, also_refs: [develop]}
           - {label: seed chart 版號（odoo）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_odoo, field: helm_chart_version, also_refs: [develop]}
           - {label: seed chart 版號（n8n）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_n8n, field: helm_chart_version, also_refs: [develop]}
@@ -929,8 +932,10 @@ products:
           - {label: seed chart 版號（opendesign）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_opendesign, field: helm_chart_version, also_refs: [develop]}
           - {label: seed chart 版號（litellm）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_litellm, field: helm_chart_version, also_refs: [develop]}
           - {label: seed chart 版號（nextcloud）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_nextcloud, field: helm_chart_version, also_refs: [develop]}
+          - {label: seed chart 版號（emqx）, file: src/data/cloud_app_templates.xml, kind: seed_field, record: cloud_app_mcp_emqx, field: helm_chart_version, also_refs: [develop]}
     exceptions: []
     notes:
+      - "EMQX 既有 seed 使用獨立來源 b5ed89ca；identity.emqx_commit 與 artifacts.emqx-mcp-admin 逐一比對 tag 和 digest。八映像改釘不得順帶改動這兩個欄位；要升 EMQX 另核對實際產物及平台變更。coverage 不排除 EMQX。"
       - "fc5fa02＝MCP 預設全開＋既有服務一次性遷移（woow-mcp-server #84）；平台 .261 起 8 個範本都釘它。這裡只看範本：既有租戶服務要換映像才會跑遷移（10-25 換了 26 個），drift 不讀租戶實際跑的映像。"
       - "woow-mcp-server main 往前走（新 PR 合併、CI 建出新 tag）時：先開清冊 PR 把 target 換成新 commit＋8 個 digest、舊的移到 known_versions，再改平台 seed、發版。"
 
