@@ -1,0 +1,23 @@
+{
+  "identity": {
+    "emqx_commit": "b5ed89ca01acfc33a7ef57987f0f64a11f603ea3"
+  },
+  "artifacts": {
+    "emqx-mcp-admin": "sha256:f60858334f11147675a0071b5caf699692ccf31fb493347da5d856bf9a8828dc"
+  },
+  "pin": {
+    "id": "emqx",
+    "label": "seed MCP 映像 emqx-mcp-admin（獨立來源）",
+    "file": "src/data/cloud_app_templates.xml",
+    "kind": "seed_image",
+    "record": "cloud_app_mcp_emqx",
+    "also_refs": [
+      "$stg_platform",
+      "develop"
+    ],
+    "compare": "identity.emqx_commit",
+    "match": "prefix",
+    "digest": "artifacts.emqx-mcp-admin",
+    "history": "gitea:WOOWTECH/woow-mcp-server"
+  }
+}

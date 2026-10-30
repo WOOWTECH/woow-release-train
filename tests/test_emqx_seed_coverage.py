@@ -3,11 +3,17 @@ import copy
 import datetime as dt
 import json
 import unittest
-from helpers import LIVE_MANIFEST_PATH, wvt
+from helpers import fixture, manifest, wvt
 
 class EmqxSeedCoverageTest(unittest.TestCase):
     def setUp(self):
-        self.product = wvt.load_manifest(LIVE_MANIFEST_PATH)['products']['woow-mcp-server']
+        # 在既有凍結快照疊加 EMQX fixture，不讀會持續升版的線上清冊。
+        self.manifest = manifest()
+        self.product = self.manifest['products']['woow-mcp-server']
+        emqx = json.loads(fixture('mcp-emqx-seed.json'))
+        self.product['target']['identity'].update(emqx['identity'])
+        self.product['target']['artifacts'].update(emqx['artifacts'])
+        self.product['legs']['paas']['pins'].append(emqx['pin'])
         self.pin = next(p for p in self.product['legs']['paas']['pins'] if p['id'] == 'emqx')
 
     def image(self, tag=None, digest=None):
@@ -20,12 +26,22 @@ class EmqxSeedCoverageTest(unittest.TestCase):
         return wvt.evaluate(self.product, 'paas', self.pin,
                             wvt.observe(self.pin, self.image(**kwargs)), dt.date(2026, 10, 30))
 
-    def test_actual_independent_source_and_digest_are_checked(self):
+    def test_independent_source_and_digest_are_checked(self):
         self.assertEqual(self.pin['compare'], 'identity.emqx_commit')
         self.assertEqual(self.pin['digest'], 'artifacts.emqx-mcp-admin')
         self.assertEqual(self.evaluate()['status'], 'ok')
-        self.assertNotEqual(self.evaluate(tag=self.product['target']['identity']['commit'])['status'], 'ok')
+        self.assertNotEqual(self.evaluate(tag='f' * 40)['status'], 'ok')
         self.assertEqual(self.evaluate(digest='sha256:' + '0' * 64)['status'], 'mismatch')
+
+    def test_same_or_different_common_source_is_legal(self):
+        identity = self.product['target']['identity']
+        for source in (identity['emqx_commit'], identity['commit']):
+            with self.subTest(emqx_source=source):
+                identity['emqx_commit'] = source
+                errors, _ = wvt.validate_manifest(self.manifest, dt.date(2026, 10, 30), expiry=False)
+                self.assertEqual(errors, [])
+                self.assertEqual(self.evaluate()['status'], 'ok')
+                self.assertNotEqual(self.evaluate(tag='f' * 40)['status'], 'ok')
 
     def test_coverage_is_a_pin_not_an_exclusion(self):
         value = json.dumps({'image': self.image()})
@@ -44,7 +60,7 @@ class EmqxSeedCoverageTest(unittest.TestCase):
         self.assertEqual(self.product['policy']['hard_rules'], [])
 
     def test_next_eight_target_preserves_emqx_without_duplicating_history(self):
-        m = wvt.load_manifest(LIVE_MANIFEST_PATH)
+        m = copy.deepcopy(self.manifest)
         p = m['products']['woow-mcp-server']
         old = copy.deepcopy(p['target'])
         del old['identity']['emqx_commit'], old['artifacts']['emqx-mcp-admin']
