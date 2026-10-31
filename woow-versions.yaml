@@ -708,7 +708,7 @@ products:
         repo: "github:WOOWTECH/Woow_ha_mcp_addons"
         ref: claude-delivery
         pins:
-          - {id: source-commit, label: vendor 來源 commit（runtime-sources.json）, file: docs/provenance/runtime-sources.json, kind: json_select, where: {product: litellm}, field: source, extract: '([0-9a-f]{40})$', compare: identity.source_commit}
+          - {id: source-commit, label: vendor server.py 來源 commit（runtime-sources.json；排除本地 urls.py）, file: docs/provenance/runtime-sources.json, kind: json_select, where: {product: litellm, path: woow_litellm_mcp_server/server.py}, field: source, extract: '([0-9a-f]{40})$', compare: identity.source_commit}
           - {id: package-version, label: 套件 __version__, file: apps/litellm/vendor/woow_litellm_mcp_server/__init__.py, kind: regex, pattern: '^__version__ = "([^"]+)"', compare: version}
           - {id: server-py, label: server.py 來源 sha256（runtime-sources.json）, file: docs/provenance/runtime-sources.json, kind: json_select, where: {product: litellm, path: woow_litellm_mcp_server/server.py}, field: upstream_sha256, parse: digest, compare: artifacts.server_py}
         package_version:
