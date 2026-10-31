@@ -870,23 +870,35 @@ products:
     upstream: {source: "gitea:WOOWTECH/woow-mcp-server"}
     policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
     target:
-      version: "2026.10.30.2339"
-      since: "2026-10-30"
+      version: "2026.10.31.1754"
+      since: "2026-10-31"
       # 八個共用來源映像與獨立的 EMQX 既有映像分別比對，不宣稱同一建置。
-      identity: {commit: "c195d5d50d0a8fa8022a825f0568bce8a989e3f1", emqx_commit: "b5ed89ca01acfc33a7ef57987f0f64a11f603ea3"}
+      identity: {commit: "29fa3efb46bc8323444f35465224c35554add8fb", emqx_commit: "b5ed89ca01acfc33a7ef57987f0f64a11f603ea3"}
       artifacts:
-        hermes-mcp-admin: "sha256:0c8e5a2cbf8069eca96c999568bde74aa94e95259e7216907ef1526107bdb669"
-        odoo-mcp-admin: "sha256:929471c7b3219ba3694c657c8f7854dd3a36f1a5dc5973175adf7ef88e2a4391"
-        n8n-mcp-admin: "sha256:c0890f46f2382129ce5df23f8a945a49df80443b67d2d795010705bbc1d414e2"
-        k8s-mcp-admin: "sha256:89a5fff01e5f330ab72676059db3780ebb9211fdbfd7530253dcf12be117e5b9"
-        vk-mcp-admin: "sha256:6c3d721e14f055105e9017fe67c4c6d3c91805425632fac11150d1b3c38c6877"
-        opendesign-mcp-admin: "sha256:3dac66c0e16a3d503876aa5a59f46c4d2a3e76345a346827077cb133eac9334d"
+        hermes-mcp-admin: "sha256:9382331f5b9dbb074d7da3be300568c45135ba303477d58b9583c9815e924107"
+        odoo-mcp-admin: "sha256:886f1492a5efe161f174bdb20f779416367f1a67f0c745e594b702bcd3f5dcf2"
+        n8n-mcp-admin: "sha256:a06ba7d7e06e399cfa1e89d8d11951c53ac6b2ac52596e25a7d3e2ac30ed2c21"
+        k8s-mcp-admin: "sha256:98bb041333eb47523f256539375861ff92f0027386ba1afb365be77c5553fea3"
+        vk-mcp-admin: "sha256:9d1f35d418894af70d20c56352403dfbc351feec954ed0e26d59e1e4e0324346"
+        opendesign-mcp-admin: "sha256:6d50d89a4378b263476ab6a0730e6a981c52f5f4625e30ed9450cd684d9cc241"
         litellm-mcp-admin: "sha256:8aff5950ddade180cbff7f01fcd6a9764ac166587b65e283fac5648554e925cf"
-        nextcloud-mcp-admin: "sha256:3cb0e7e186a1016de8e563ac96a8d59ee0916d7d96e51938669b3eb62df1742e"
+        nextcloud-mcp-admin: "sha256:5e82a4e55e022d7db5d0679262137ceff3a46d73a779e87c25e4910ae996d010"
         emqx-mcp-admin: "sha256:f60858334f11147675a0071b5caf699692ccf31fb493347da5d856bf9a8828dc"
-      verified: "一般 main CI33053 八映像 build／certifi／smoke／push 成功；PR102 修正 Odoo generic connection 型別驗證。registry manifest/config 重驗通過，與既有 app/core COPY 來源證據相符。完整來源驗收 SHA256 ee387b59fb5665ed8a10a15edff8ce8873e8de4fbf82436ea376f2f6d346b10e；本次重驗 SHA256 bde4b1a32bff056c4332546b45cb0a47719e0de4eabf2cea80bdd9767a2ae6c9。僅更新目標；正式部署另行驗收。EMQX 保留獨立來源。"
+      verified: "2026-10-31：woow-mcp-server #104 merged main 29fa3efb；main CI run 33365 core-tests 與九個 build/smoke/push 全綠。八個非 EMQX tag/immutable manifest/config/linux-amd64/UID 1000:1000 逐一讀回；evidence/mcp104-publication.json SHA256 3b5c92159a58c3ed689e79fccb51fa81f926ac98f80c9cd3f9da8b98661ac507。此變更只更新 target，平台範本與既存租戶另行發布驗收；EMQX 維持獨立來源。"
     known_versions:
-      # 前版完整映射見 evidence/mcp102-publication.json；不重複登記 target 共用的 EMQX/digest。
+      - version: "2026.10.30.2339"
+        since: "2026-10-30"
+        identity: {commit: "c195d5d50d0a8fa8022a825f0568bce8a989e3f1"}
+        artifacts:
+          hermes-mcp-admin: "sha256:0c8e5a2cbf8069eca96c999568bde74aa94e95259e7216907ef1526107bdb669"
+          odoo-mcp-admin: "sha256:929471c7b3219ba3694c657c8f7854dd3a36f1a5dc5973175adf7ef88e2a4391"
+          n8n-mcp-admin: "sha256:c0890f46f2382129ce5df23f8a945a49df80443b67d2d795010705bbc1d414e2"
+          k8s-mcp-admin: "sha256:89a5fff01e5f330ab72676059db3780ebb9211fdbfd7530253dcf12be117e5b9"
+          vk-mcp-admin: "sha256:6c3d721e14f055105e9017fe67c4c6d3c91805425632fac11150d1b3c38c6877"
+          opendesign-mcp-admin: "sha256:3dac66c0e16a3d503876aa5a59f46c4d2a3e76345a346827077cb133eac9334d"
+          nextcloud-mcp-admin: "sha256:3cb0e7e186a1016de8e563ac96a8d59ee0916d7d96e51938669b3eb62df1742e"
+        verified: "前版八映像證據見 evidence/mcp102-publication.json；LiteLLM digest 與現行 target 相同、EMQX 沿用獨立來源，兩者不在此重複登記。"
+      # 更早的 10-30 版本見各自證據；EMQX 的獨立 digest 不在這裡重複登記。
       - version: "2026.10.30.1509"
         since: "2026-10-30"
         identity: {commit: "accea2e6bee1f31e79eb1d437e807dfe0dc3d683"}

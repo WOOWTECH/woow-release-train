@@ -1,0 +1,195 @@
+{
+  "source_commit": "29fa3efb46bc8323444f35465224c35554add8fb",
+  "source_PR": "https://git-prod.woowtech.io/WOOWTECH/woow-mcp-server/pulls/104",
+  "includes_prior_n8n_fix_PR": "https://git-prod.woowtech.io/WOOWTECH/woow-mcp-server/pulls/103",
+  "main_branch_readback": "29fa3efb46bc8323444f35465224c35554add8fb",
+  "normal_ci_run": {
+    "id": 33365,
+    "run_number": 1202,
+    "event": "push",
+    "head_sha": "29fa3efb46bc8323444f35465224c35554add8fb",
+    "head_branch": "main",
+    "status": "completed",
+    "conclusion": "success",
+    "html_url": "https://git-prod.woowtech.io/WOOWTECH/woow-mcp-server/actions/runs/33365",
+    "started_at": "2026-10-31T17:54:28Z",
+    "completed_at": "2026-10-31T18:01:53Z"
+  },
+  "jobs": [
+    {
+      "name": "core-tests",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "changed",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "build (emqx)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "build (hermes)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "build (k8s)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "build (litellm)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "build (n8n)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "build (nextcloud)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "build (odoo)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "build (opendesign)",
+      "status": "completed",
+      "conclusion": "success"
+    },
+    {
+      "name": "build (vk)",
+      "status": "completed",
+      "conclusion": "success"
+    }
+  ],
+  "scoped_registry_readback_sha256": "5f814d72446c20ac352375108b3d2fa575daecf2179def76c97cd237255965d8",
+  "scoped_registry_secret_uid": "2d35e887-91eb-4077-9273-330143a4cf9c",
+  "pins": {
+    "hermes": {
+      "tag": "jcr-prod.woowtech.io/woow-paas-docker-local/hermes-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb",
+      "manifest_digest": "sha256:9382331f5b9dbb074d7da3be300568c45135ba303477d58b9583c9815e924107",
+      "config_digest": "sha256:e3eb41d06c402f8bfcd91826f4bc4431a7c19cfa0a0f6ee02b319b33f1bf32be",
+      "reference": "jcr-prod.woowtech.io/woow-paas-docker-local/hermes-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb@sha256:9382331f5b9dbb074d7da3be300568c45135ba303477d58b9583c9815e924107",
+      "immutable_reference": "jcr-prod.woowtech.io/woow-paas-docker-local/hermes-mcp-admin@sha256:9382331f5b9dbb074d7da3be300568c45135ba303477d58b9583c9815e924107",
+      "manifest_by_tag_equals_by_digest": true,
+      "os": "linux",
+      "architecture": "amd64",
+      "user": "1000:1000",
+      "layer_count": 16,
+      "source_label": null
+    },
+    "odoo": {
+      "tag": "jcr-prod.woowtech.io/woow-paas-docker-local/odoo-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb",
+      "manifest_digest": "sha256:886f1492a5efe161f174bdb20f779416367f1a67f0c745e594b702bcd3f5dcf2",
+      "config_digest": "sha256:8235a372c38a5bae893738d836987ddb45272fe6d0649f18fd21dfd17b59a504",
+      "reference": "jcr-prod.woowtech.io/woow-paas-docker-local/odoo-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb@sha256:886f1492a5efe161f174bdb20f779416367f1a67f0c745e594b702bcd3f5dcf2",
+      "immutable_reference": "jcr-prod.woowtech.io/woow-paas-docker-local/odoo-mcp-admin@sha256:886f1492a5efe161f174bdb20f779416367f1a67f0c745e594b702bcd3f5dcf2",
+      "manifest_by_tag_equals_by_digest": true,
+      "os": "linux",
+      "architecture": "amd64",
+      "user": "1000:1000",
+      "layer_count": 19,
+      "source_label": null
+    },
+    "n8n": {
+      "tag": "jcr-prod.woowtech.io/woow-paas-docker-local/n8n-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb",
+      "manifest_digest": "sha256:a06ba7d7e06e399cfa1e89d8d11951c53ac6b2ac52596e25a7d3e2ac30ed2c21",
+      "config_digest": "sha256:54ac2ea5c921aeb74d0c2163117a7e2f14559618c496664d9900ee42512e0db2",
+      "reference": "jcr-prod.woowtech.io/woow-paas-docker-local/n8n-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb@sha256:a06ba7d7e06e399cfa1e89d8d11951c53ac6b2ac52596e25a7d3e2ac30ed2c21",
+      "immutable_reference": "jcr-prod.woowtech.io/woow-paas-docker-local/n8n-mcp-admin@sha256:a06ba7d7e06e399cfa1e89d8d11951c53ac6b2ac52596e25a7d3e2ac30ed2c21",
+      "manifest_by_tag_equals_by_digest": true,
+      "os": "linux",
+      "architecture": "amd64",
+      "user": "1000:1000",
+      "layer_count": 35,
+      "source_label": null
+    },
+    "k8s": {
+      "tag": "jcr-prod.woowtech.io/woow-paas-docker-local/k8s-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb",
+      "manifest_digest": "sha256:98bb041333eb47523f256539375861ff92f0027386ba1afb365be77c5553fea3",
+      "config_digest": "sha256:f77e85938144f9e193689547a3b97731882c7dad17839bb28259cc52385308fd",
+      "reference": "jcr-prod.woowtech.io/woow-paas-docker-local/k8s-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb@sha256:98bb041333eb47523f256539375861ff92f0027386ba1afb365be77c5553fea3",
+      "immutable_reference": "jcr-prod.woowtech.io/woow-paas-docker-local/k8s-mcp-admin@sha256:98bb041333eb47523f256539375861ff92f0027386ba1afb365be77c5553fea3",
+      "manifest_by_tag_equals_by_digest": true,
+      "os": "linux",
+      "architecture": "amd64",
+      "user": "1000:1000",
+      "layer_count": 18,
+      "source_label": null
+    },
+    "vk": {
+      "tag": "jcr-prod.woowtech.io/woow-paas-docker-local/vk-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb",
+      "manifest_digest": "sha256:9d1f35d418894af70d20c56352403dfbc351feec954ed0e26d59e1e4e0324346",
+      "config_digest": "sha256:c97721a4a6bf1b26b52ba438aaf0f9e765d6532aebe0f352e0b36609ddd36c85",
+      "reference": "jcr-prod.woowtech.io/woow-paas-docker-local/vk-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb@sha256:9d1f35d418894af70d20c56352403dfbc351feec954ed0e26d59e1e4e0324346",
+      "immutable_reference": "jcr-prod.woowtech.io/woow-paas-docker-local/vk-mcp-admin@sha256:9d1f35d418894af70d20c56352403dfbc351feec954ed0e26d59e1e4e0324346",
+      "manifest_by_tag_equals_by_digest": true,
+      "os": "linux",
+      "architecture": "amd64",
+      "user": "1000:1000",
+      "layer_count": 20,
+      "source_label": null
+    },
+    "opendesign": {
+      "tag": "jcr-prod.woowtech.io/woow-paas-docker-local/opendesign-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb",
+      "manifest_digest": "sha256:6d50d89a4378b263476ab6a0730e6a981c52f5f4625e30ed9450cd684d9cc241",
+      "config_digest": "sha256:bf20338634012e039803419d4077a5e3cde1ee0b55e16c408aaec5cab1f335cd",
+      "reference": "jcr-prod.woowtech.io/woow-paas-docker-local/opendesign-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb@sha256:6d50d89a4378b263476ab6a0730e6a981c52f5f4625e30ed9450cd684d9cc241",
+      "immutable_reference": "jcr-prod.woowtech.io/woow-paas-docker-local/opendesign-mcp-admin@sha256:6d50d89a4378b263476ab6a0730e6a981c52f5f4625e30ed9450cd684d9cc241",
+      "manifest_by_tag_equals_by_digest": true,
+      "os": "linux",
+      "architecture": "amd64",
+      "user": "1000:1000",
+      "layer_count": 19,
+      "source_label": null
+    },
+    "litellm": {
+      "tag": "jcr-prod.woowtech.io/woow-paas-docker-local/litellm-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb",
+      "manifest_digest": "sha256:8aff5950ddade180cbff7f01fcd6a9764ac166587b65e283fac5648554e925cf",
+      "config_digest": "sha256:f6f75ffad2c0db46d66936e482ca52f6fcf729e9f50489f8bfa7ab750809d65f",
+      "reference": "jcr-prod.woowtech.io/woow-paas-docker-local/litellm-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb@sha256:8aff5950ddade180cbff7f01fcd6a9764ac166587b65e283fac5648554e925cf",
+      "immutable_reference": "jcr-prod.woowtech.io/woow-paas-docker-local/litellm-mcp-admin@sha256:8aff5950ddade180cbff7f01fcd6a9764ac166587b65e283fac5648554e925cf",
+      "manifest_by_tag_equals_by_digest": true,
+      "os": "linux",
+      "architecture": "amd64",
+      "user": "1000:1000",
+      "layer_count": 17,
+      "source_label": null
+    },
+    "nextcloud": {
+      "tag": "jcr-prod.woowtech.io/woow-paas-docker-local/nextcloud-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb",
+      "manifest_digest": "sha256:5e82a4e55e022d7db5d0679262137ceff3a46d73a779e87c25e4910ae996d010",
+      "config_digest": "sha256:90c7c84b5a7d565388b2558f798714226d77ee1f395dc47cbaf4ae07e5f13cba",
+      "reference": "jcr-prod.woowtech.io/woow-paas-docker-local/nextcloud-mcp-admin:29fa3efb46bc8323444f35465224c35554add8fb@sha256:5e82a4e55e022d7db5d0679262137ceff3a46d73a779e87c25e4910ae996d010",
+      "immutable_reference": "jcr-prod.woowtech.io/woow-paas-docker-local/nextcloud-mcp-admin@sha256:5e82a4e55e022d7db5d0679262137ceff3a46d73a779e87c25e4910ae996d010",
+      "manifest_by_tag_equals_by_digest": true,
+      "os": "linux",
+      "architecture": "amd64",
+      "user": "1000:1000",
+      "layer_count": 17,
+      "source_label": null
+    }
+  },
+  "source_diff_from_previous_target": [
+    ".gitea/workflows/ci.yml",
+    "apps/n8n/Dockerfile",
+    "apps/n8n/n8n_mcp_admin/upstream_output_schema_patch.py",
+    "apps/n8n/scripts/ci_smoke_child.py",
+    "apps/n8n/tests/test_upstream_output_schema_patch.py",
+    "apps/n8n/tests/test_upstream_pins.py",
+    "docs/verification/2026-10-31-n8n-schema-bundle-rebuild.md",
+    "docs/verification/2026-10-31-n8n-workflow-output-schema.md"
+  ],
+  "independent_emqx_target_unchanged": "b5ed89ca01acfc33a7ef57987f0f64a11f603ea3",
+  "scope": "CI and registry eight non-EMQX images only. No existing tenant rollout or HA add-on publication claim. OCI configs have no source revision label; source binding is from main CI run and immutable commit tags."
+}
