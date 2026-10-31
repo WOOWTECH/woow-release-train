@@ -870,22 +870,36 @@ products:
     upstream: {source: "gitea:WOOWTECH/woow-mcp-server"}
     policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
     target:
-      version: "2026.10.30.1509"
+      version: "2026.10.30.2339"
       since: "2026-10-30"
       # 八個共用來源映像與獨立的 EMQX 既有映像分別比對，不宣稱同一建置。
-      identity: {commit: "accea2e6bee1f31e79eb1d437e807dfe0dc3d683", emqx_commit: "b5ed89ca01acfc33a7ef57987f0f64a11f603ea3"}
+      identity: {commit: "c195d5d50d0a8fa8022a825f0568bce8a989e3f1", emqx_commit: "b5ed89ca01acfc33a7ef57987f0f64a11f603ea3"}
       artifacts:
-        hermes-mcp-admin: "sha256:75106dc89347c3f826e0000efaca1367dfd77dbf0213a9f5c2ec95f2865bd27c"
-        odoo-mcp-admin: "sha256:e7a65c29d0fa6e71ef54cdc1088a351a10598d01ebf3ef408a6f78d111a6ccdb"
-        n8n-mcp-admin: "sha256:ba3fa807474c9e3d59c4a87365bd1c6ff81c07c3f05d14871cf7d01765fbfdb6"
-        k8s-mcp-admin: "sha256:8d7283ee1e001bdb43410dcc1f82b86798243181e284de791d3c3678ce3b8c78"
-        vk-mcp-admin: "sha256:1671e652d2168362f8fae53d426df1b05b64f57425d662591d85ea8cfadfffc5"
-        opendesign-mcp-admin: "sha256:96f01bc2a9306250c26e1781f88dbaae77004bed17accaee44e5d7fb7d3f04a6"
-        litellm-mcp-admin: "sha256:c07db1ce1947e59621e6f862514b193236c1fd40e3d04185573ee556c5835470"
-        nextcloud-mcp-admin: "sha256:d0338a54cf88c899924a8a96bda4bc4da2a1f5f5313c1ebd645c26c37ad83205"
+        hermes-mcp-admin: "sha256:0c8e5a2cbf8069eca96c999568bde74aa94e95259e7216907ef1526107bdb669"
+        odoo-mcp-admin: "sha256:929471c7b3219ba3694c657c8f7854dd3a36f1a5dc5973175adf7ef88e2a4391"
+        n8n-mcp-admin: "sha256:c0890f46f2382129ce5df23f8a945a49df80443b67d2d795010705bbc1d414e2"
+        k8s-mcp-admin: "sha256:89a5fff01e5f330ab72676059db3780ebb9211fdbfd7530253dcf12be117e5b9"
+        vk-mcp-admin: "sha256:6c3d721e14f055105e9017fe67c4c6d3c91805425632fac11150d1b3c38c6877"
+        opendesign-mcp-admin: "sha256:3dac66c0e16a3d503876aa5a59f46c4d2a3e76345a346827077cb133eac9334d"
+        litellm-mcp-admin: "sha256:8aff5950ddade180cbff7f01fcd6a9764ac166587b65e283fac5648554e925cf"
+        nextcloud-mcp-admin: "sha256:3cb0e7e186a1016de8e563ac96a8d59ee0916d7d96e51938669b3eb62df1742e"
         emqx-mcp-admin: "sha256:f60858334f11147675a0071b5caf699692ccf31fb493347da5d856bf9a8828dc"
-      verified: "一般 main CI32918 實際八映像 build／certifi／smoke／push 成功；registry manifest/config 與 app/core COPY 來源核對通過。來源 accea2e6 含 Hermes PR99／100；驗收收據 SHA256 de40094c5946996d783fc22cb9c69e8378341eb2756f05dccfefed0a21039826。僅更新目標，未宣稱正式站已部署；EMQX 沿用獨立來源。"
+      verified: "一般 main CI33053 八映像 build／certifi／smoke／push 成功；PR102 修正 Odoo generic connection 型別驗證。registry manifest/config 重驗通過，與既有 app/core COPY 來源證據相符。完整來源驗收 SHA256 ee387b59fb5665ed8a10a15edff8ce8873e8de4fbf82436ea376f2f6d346b10e；本次重驗 SHA256 bde4b1a32bff056c4332546b45cb0a47719e0de4eabf2cea80bdd9767a2ae6c9。僅更新目標；正式部署另行驗收。EMQX 保留獨立來源。"
     known_versions:
+      # 前版完整映射見 evidence/mcp102-publication.json；不重複登記 target 共用的 EMQX/digest。
+      - version: "2026.10.30.1509"
+        since: "2026-10-30"
+        identity: {commit: "accea2e6bee1f31e79eb1d437e807dfe0dc3d683"}
+        artifacts:
+          hermes-mcp-admin: "sha256:75106dc89347c3f826e0000efaca1367dfd77dbf0213a9f5c2ec95f2865bd27c"
+          odoo-mcp-admin: "sha256:e7a65c29d0fa6e71ef54cdc1088a351a10598d01ebf3ef408a6f78d111a6ccdb"
+          n8n-mcp-admin: "sha256:ba3fa807474c9e3d59c4a87365bd1c6ff81c07c3f05d14871cf7d01765fbfdb6"
+          k8s-mcp-admin: "sha256:8d7283ee1e001bdb43410dcc1f82b86798243181e284de791d3c3678ce3b8c78"
+          vk-mcp-admin: "sha256:1671e652d2168362f8fae53d426df1b05b64f57425d662591d85ea8cfadfffc5"
+          opendesign-mcp-admin: "sha256:96f01bc2a9306250c26e1781f88dbaae77004bed17accaee44e5d7fb7d3f04a6"
+          litellm-mcp-admin: "sha256:c07db1ce1947e59621e6f862514b193236c1fd40e3d04185573ee556c5835470"
+          nextcloud-mcp-admin: "sha256:d0338a54cf88c899924a8a96bda4bc4da2a1f5f5313c1ebd645c26c37ad83205"
+        verified: "一般 main CI32918 實際八映像 build／certifi／smoke／push 成功；registry manifest/config 與 app/core COPY 來源核對通過。來源 accea2e6 含 Hermes PR99／100；驗收收據 SHA256 de40094c5946996d783fc22cb9c69e8378341eb2756f05dccfefed0a21039826。僅更新目標，未宣稱正式站已部署；EMQX 沿用獨立來源。"
       # 與 target 共用且不重複登記的 digest：k8s-mcp-admin, vk-mcp-admin, litellm-mcp-admin；完整前版映射見 evidence/mcp101-publication.json。
       - version: "2026.10.30.0708"
         since: "2026-10-30"
