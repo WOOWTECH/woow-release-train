@@ -1100,27 +1100,36 @@ products:
     upstream: {image: ghcr.io/woowtech/woow-k3s-pi-agent, source: "github:WOOWTECH/Woow_k3s_pi_agent_package"}
     policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
     target:
-      version: "0.3.21"            # root 映像版本（含外掛 0.3.29、Paseo 0.1.14）
-      since: "2026-10-29"
-      index_digest: "sha256:ce0895df04c00885a85638e59b44b3cc852ec92bff75d99ead0f0efdeb46bb34"
+      version: "0.3.24"            # root 映像版本（預裝 Claude Code 2.1.296／Codex 0.162.1，Pi 技能與全域 MCP 三方共享；外掛 0.3.31、Paseo 0.1.15）
+      since: "2026-11-02"
+      index_digest: "sha256:1c9045028417bc44ed79de16e5ba50adc77e7e826f4cc1aa160ce92a8f28f285"
       artifacts:
-        paas_image: "sha256:7997f1db0e6e585f76677b28ba4d2496ae6264ec2b3c7779a4575f12056da2f9"   # JCR pi-agent:20261029.0606（已 promote、chart 0.1.17 已發佈，平台 .279 才帶 seed）
+        paas_image: "sha256:596251bb3bd915ffa17706c12b13c354eacba73c96c48e3c1aed56a43e9e10df"   # JCR pi-agent:20261101.2318（核可單 #538、promotion run 34688；＝0017 加 Pi 模型選單補丁 8cfa61de3c81 與其測試，其餘不變；平台 .288 起的 seed）
       identity:
-        paas_image_tag: "20261029.0606"
-        chart_version: "0.1.17"
-      verified: "2026-10-29 alignment_audit.py（audit-receipt-1029-now.json：44 PASS／2 WARN／0 FAIL）"
+        paas_image_tag: "20261101.2318"
+        chart_version: "0.1.20"
+        chart_app_version: "20261101.0017"   # chart 0.1.20 的 appVersion 停在 0017：2318 沒動 workload 範本，不另發 chart 版（平台 seed #2119 的決定）
+      verified: "2026-11-02：建置 34670（paas-odoo-ci main bc2cf79b，補丁 --strict 套用、行為測試 14 項含兩個真 Pi 測試）→ 核可單 #538 → promotion run 34688；JCR 讀回 digest 與候選相同；HA 測試機 elmohome 的 Pi add-on 0.15.21（同一支補丁）實測探針 env 金鑰 0→402／內建＋env 金鑰 0→17／無假 No/models"
     known_versions:
-      - version: "0.3.20"          # 正式站現行（平台 .277／.278：chart 0.1.16、映像 1328）
+      - version: "0.3.23"          # 正式站現行（平台 .287：chart 0.1.19、映像 1101）；6 台 Pi 租戶都跑它，.288 上線後由 03 線第 6 輪升到 2318
+        index_digest: "sha256:4039b4d22a255648c98bb9dc2e8a59c70a2cdb408993d969686beeff94342135"
+        artifacts: {paas_image: "sha256:6144c9ffb7cd5f02671c2ba3ba8a2956d254945c04f4d5377d087ffe36cf0f14"}
+        identity: {paas_image_tag: "20261030.1101", chart_version: "0.1.19", chart_app_version: "20261030.1101"}
+      - version: "0.3.21"          # 上一個目標（映像 0606、chart 0.1.17）
+        index_digest: "sha256:ce0895df04c00885a85638e59b44b3cc852ec92bff75d99ead0f0efdeb46bb34"
+        artifacts: {paas_image: "sha256:7997f1db0e6e585f76677b28ba4d2496ae6264ec2b3c7779a4575f12056da2f9"}
+        identity: {paas_image_tag: "20261029.0606", chart_version: "0.1.17", chart_app_version: "20261029.0606"}
+      - version: "0.3.20"          # 平台 .277／.278：chart 0.1.16、映像 1328
         index_digest: "sha256:19a50724cc64b3337781003c56811edf1297618a98efa9ee171b358523acccc6"
         artifacts: {paas_image: "sha256:9a45d8eaf68b84c402f0673b977d7efcb101d98aaa44b0220059549bf9b5c583"}
-        identity: {paas_image_tag: "20261028.1328", chart_version: "0.1.16"}
+        identity: {paas_image_tag: "20261028.1328", chart_version: "0.1.16", chart_app_version: "20261028.1328"}
     legs:
       paas:
         repo: "gitea:woow-paas/paas-odoo-ci"
         ref: main
         pins:
           - {id: base, label: PaaS 映像基底（root tag＋index digest）, file: pi-agent/Dockerfile, kind: dockerfile_arg, name: BASE, parse: image_ref, compare: index_digest}
-          - {id: chart-appversion, label: chart appVersion（＝JCR 映像 tag）, repo: "gitea:woow-paas/woow-paas-charts", ref: main, file: charts/pi-agent/Chart.yaml, kind: yaml, path: appVersion, compare: identity.paas_image_tag}
+          - {id: chart-appversion, label: chart appVersion（通常＝JCR 映像 tag；0.1.20 停在 0017，見 target.identity.chart_app_version）, repo: "gitea:woow-paas/woow-paas-charts", ref: main, file: charts/pi-agent/Chart.yaml, kind: yaml, path: appVersion, compare: identity.chart_app_version}
           - {id: chart-version, label: chart 版號, repo: "gitea:woow-paas/woow-paas-charts", ref: main, file: charts/pi-agent/Chart.yaml, kind: yaml, path: version, compare: identity.chart_version}
           - id: seed
             label: 平台 seed 的 pi-agent 映像（tag＋digest）
@@ -1137,7 +1146,8 @@ products:
         fanout: {enabled: false, reason: "要先有 paas-odoo-ci 的 build-pi-agent-image 核可單（人工 /approve），再 chart、再 seed；機器人只開 PR 的接力未建"}
     exceptions: []
     notes:
-      - "目前線上 PaaS 租戶（6 台）跑 1328、正式站 seed 也是 1328；清冊目標是已 promote 的 0606：develop 的 seed 落後一版是設計內的接力狀態，不是漂移事故。"
+      - "目前線上 PaaS 租戶（6 台）跑 1101、正式站 seed 也是 1101（平台 .287：chart 0.1.19）；清冊目標是已 promote 的 2318（含 Pi 模型選單補丁）：平台 .288（tag v18.0.1.0.288，develop 的 seed 已是 chart 0.1.20＋2318）上正式站、03 線第 6 輪升租戶之前，正式站落後一版是設計內的接力狀態，不是漂移事故。"
+      - "20261101.0017 與 20261101.0907 也在 JCR 正式 tag 裡但不是目標：0017 沒有 model-options 補丁、0907 是舊補丁 2775e207（空設定會出假模型 No/models），seed 不要釘它們。"
       - "HA add-on 不在這條鏈上（它自己的 Dockerfile 建 Pi Web 0.12.0），所以沒有 ha leg（validate 會警告一次）。"
 
 observations:
