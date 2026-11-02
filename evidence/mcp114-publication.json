@@ -1,0 +1,120 @@
+{
+  "independent_emqx_target_unchanged": true,
+  "input_receipts": {
+    "main_ci": {
+      "filename": "PAAS-MAIN-3C0B-CI-35296.json",
+      "sha256": "d0e2f5acbdbdc61f2766942c05c2cec39cd2f3977d8a1ce359e60b5d38c5e6dc"
+    },
+    "merge": {
+      "filename": "PAAS-HERMES-PR114-MERGE-20261102.json",
+      "sha256": "f11884e165649a6a6467065b2ae43b633b62508b8aa0717dbb4723e2279d17a9"
+    },
+    "registry": {
+      "filename": "PAAS-EIGHT-3c0b970e-READBACK.json",
+      "sha256": "f43e3338b0e24394291cb42189315645246cbfd06100e9455fca7a8cb3adf36b"
+    }
+  },
+  "pins": {
+    "hermes-mcp-admin": {
+      "config_digest": "sha256:ce5d53a4966982474681520f691c791f6eb781e2123aefc07e8ad30c40ab794c",
+      "manifest_digest": "sha256:261fc91d936148099e8b9fa28832f97e438140883bab96d901ee957ed0e40362",
+      "readback": {
+        "config_by_tag_equals_digest": true,
+        "config_digest_equals_manifest_config": true,
+        "linux_amd64_uid_1000": true,
+        "manifest_by_tag_equals_digest": true
+      },
+      "tag_commit": "3c0b970e759d557653721fbccf901dba1abaeb8b"
+    },
+    "k8s-mcp-admin": {
+      "config_digest": "sha256:b5771995dab5802aaa51e88fa93ecec10e8f05920a9c2e65d568bd5e63aee9df",
+      "manifest_digest": "sha256:89a5fff01e5f330ab72676059db3780ebb9211fdbfd7530253dcf12be117e5b9",
+      "readback": {
+        "config_by_tag_equals_digest": true,
+        "config_digest_equals_manifest_config": true,
+        "linux_amd64_uid_1000": true,
+        "manifest_by_tag_equals_digest": true
+      },
+      "tag_commit": "3c0b970e759d557653721fbccf901dba1abaeb8b"
+    },
+    "litellm-mcp-admin": {
+      "config_digest": "sha256:34473fd0337cd48ae295540eb8d4c32ce0d94a6c20926538fc3bffa854fac473",
+      "manifest_digest": "sha256:a559eaf714a2fedeee3b9419cc4c73464e06d7a5c2a5bbb238fd3600333e9e69",
+      "readback": {
+        "config_by_tag_equals_digest": true,
+        "config_digest_equals_manifest_config": true,
+        "linux_amd64_uid_1000": true,
+        "manifest_by_tag_equals_digest": true
+      },
+      "tag_commit": "3c0b970e759d557653721fbccf901dba1abaeb8b"
+    },
+    "n8n-mcp-admin": {
+      "config_digest": "sha256:54ac2ea5c921aeb74d0c2163117a7e2f14559618c496664d9900ee42512e0db2",
+      "manifest_digest": "sha256:a06ba7d7e06e399cfa1e89d8d11951c53ac6b2ac52596e25a7d3e2ac30ed2c21",
+      "readback": {
+        "config_by_tag_equals_digest": true,
+        "config_digest_equals_manifest_config": true,
+        "linux_amd64_uid_1000": true,
+        "manifest_by_tag_equals_digest": true
+      },
+      "tag_commit": "3c0b970e759d557653721fbccf901dba1abaeb8b"
+    },
+    "nextcloud-mcp-admin": {
+      "config_digest": "sha256:11d9bbe71538f1c46e8b6946f910011f15cd75d516cd418c125321007cb0a545",
+      "manifest_digest": "sha256:83a4fe234fd63919edd34de521d648fad611f4cc25b5259bba29acba30fc58b8",
+      "readback": {
+        "config_by_tag_equals_digest": true,
+        "config_digest_equals_manifest_config": true,
+        "linux_amd64_uid_1000": true,
+        "manifest_by_tag_equals_digest": true
+      },
+      "tag_commit": "3c0b970e759d557653721fbccf901dba1abaeb8b"
+    },
+    "odoo-mcp-admin": {
+      "config_digest": "sha256:0eb7756ee5ec94711c94300e6aff4e560055e71a798aedbca3a6b5d7f7f9c1f0",
+      "manifest_digest": "sha256:5c0c1c4ddce89b21250f8be0b2c18c186e0325e8d963714c9fd2e698166d20de",
+      "readback": {
+        "config_by_tag_equals_digest": true,
+        "config_digest_equals_manifest_config": true,
+        "linux_amd64_uid_1000": true,
+        "manifest_by_tag_equals_digest": true
+      },
+      "tag_commit": "3c0b970e759d557653721fbccf901dba1abaeb8b"
+    },
+    "opendesign-mcp-admin": {
+      "config_digest": "sha256:87f88ed6aef70385e358e7c0b548901ddca8da2c019c03cd87a67b99b61fa67e",
+      "manifest_digest": "sha256:4380b6e24e831a052d98db1242fa96a3cade57fd331ed6f65eea0130ac7f8238",
+      "readback": {
+        "config_by_tag_equals_digest": true,
+        "config_digest_equals_manifest_config": true,
+        "linux_amd64_uid_1000": true,
+        "manifest_by_tag_equals_digest": true
+      },
+      "tag_commit": "3c0b970e759d557653721fbccf901dba1abaeb8b"
+    },
+    "vk-mcp-admin": {
+      "config_digest": "sha256:67a23badabc86577bc68f18372c4c835ead3761c6c89c1f7575eac637ff83df1",
+      "manifest_digest": "sha256:6c3d721e14f055105e9017fe67c4c6d3c91805425632fac11150d1b3c38c6877",
+      "readback": {
+        "config_by_tag_equals_digest": true,
+        "config_digest_equals_manifest_config": true,
+        "linux_amd64_uid_1000": true,
+        "manifest_by_tag_equals_digest": true
+      },
+      "tag_commit": "3c0b970e759d557653721fbccf901dba1abaeb8b"
+    }
+  },
+  "registry_readback_at": "2026-11-02T06:07:15.242857+00:00",
+  "scope": "Source merge, CI and authenticated registry readback for eight non-EMQX images. No platform template pin, tenant rollout, real backend behavior or HA add-on publication claim.",
+  "source": {
+    "checks": "success",
+    "commit": "3c0b970e759d557653721fbccf901dba1abaeb8b",
+    "main_ci_run": 35296,
+    "merge_time_utc": "2026-11-02T05:59:47Z",
+    "mirror_run": 35297,
+    "pr_ci_run": 35262,
+    "pull_request": 114,
+    "release_train_run": 35298,
+    "repo": "WOOWTECH/woow-mcp-server"
+  }
+}
