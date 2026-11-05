@@ -871,22 +871,57 @@ products:
     upstream: {source: "gitea:WOOWTECH/woow-mcp-server"}
     policy: {mode: lockstep, downgrade: allowed, hard_rules: []}
     target:
-      version: "2026.11.01.0350"
-      since: "2026-11-01"
+      version: "2026.11.05.0101"
+      since: "2026-11-05"
       # 八個共用來源映像與獨立的 EMQX 既有映像分別比對，不宣稱同一建置。
-      identity: {commit: "169f224d42d2c0e236a62e4d26f155b1a3ed21eb", emqx_commit: "b5ed89ca01acfc33a7ef57987f0f64a11f603ea3"}
+      identity: {commit: "21ec3be88a2c7069d760700230f0acedea9c4a64", emqx_commit: "b5ed89ca01acfc33a7ef57987f0f64a11f603ea3"}
       artifacts:
-        hermes-mcp-admin: "sha256:9382331f5b9dbb074d7da3be300568c45135ba303477d58b9583c9815e924107"
-        odoo-mcp-admin: "sha256:886f1492a5efe161f174bdb20f779416367f1a67f0c745e594b702bcd3f5dcf2"
+        hermes-mcp-admin: "sha256:0d6ad4e4780c1820f01087c7df71ba8b16d7b3ae552437806f6a2d12ab75c6b6"
+        odoo-mcp-admin: "sha256:af66d44e53d4f192965b505e3952154a25f96083ed4c293cd8ee4c78a153a9d4"
         n8n-mcp-admin: "sha256:a06ba7d7e06e399cfa1e89d8d11951c53ac6b2ac52596e25a7d3e2ac30ed2c21"
         k8s-mcp-admin: "sha256:98bb041333eb47523f256539375861ff92f0027386ba1afb365be77c5553fea3"
         vk-mcp-admin: "sha256:6c3d721e14f055105e9017fe67c4c6d3c91805425632fac11150d1b3c38c6877"
-        opendesign-mcp-admin: "sha256:0f776a0c46a10d8dc5740972d9323b9a178a04d2baae4d3f8422982f0aae4cac"
-        litellm-mcp-admin: "sha256:2e873fedc97ac7315d51dcea55dcda113ea9d2f083450b9ea0185cccc410c0f4"
-        nextcloud-mcp-admin: "sha256:25ccfad161c6f5374c9212b32107f2770ada9b686c2486d27280dc3ea44325b8"
+        opendesign-mcp-admin: "sha256:4380b6e24e831a052d98db1242fa96a3cade57fd331ed6f65eea0130ac7f8238"
+        litellm-mcp-admin: "sha256:a559eaf714a2fedeee3b9419cc4c73464e06d7a5c2a5bbb238fd3600333e9e69"
+        nextcloud-mcp-admin: "sha256:e494a37fa5f4517e8f437d6397dcca8bc837ffab86e84ce638217254409a603e"
         emqx-mcp-admin: "sha256:f60858334f11147675a0071b5caf699692ccf31fb493347da5d856bf9a8828dc"
-      verified: "2026-11-01：woow-mcp-server #109 merged main 169f224d；main CI 33599 core-tests 與九個 build/certifi/smoke/push 全綠；八個非 EMQX tag/immutable manifest/config/linux-amd64/UID 1000:1000 逐一讀回。evidence/mcp109-publication.json SHA256 e40a73964126d5055eb454966b3986c7727cfa520532e56fa800e86596c7da15。僅更新目標，平台範本與既存租戶另行發布驗收；EMQX 維持獨立來源。"
+      verified: "2026-11-05：woow-mcp-server #116、#117 merged main 21ec3be8；main CI 37152、mirror 37155 與 release-train 37159 成功，八個非 EMQX tag/immutable manifest/config/linux-amd64/UID 1000:1000 逐一讀回，digest 與 CI push 輸出一致，Odoo 的 CI 映像 ID 等於 registry config digest。evidence/mcp115-publication.json SHA256 61f6ae72569f78e7afc746a2aa8e0b733afb8a5b6aea53ce98f35639fe1c81ac。僅更新目標；平台 develop 已於 2026-11-05 合併 #2181 改釘這八個映像（新安裝才用，既存租戶另行升級）；EMQX 維持獨立來源。"
     known_versions:
+      - version: "2026.11.02.0559"
+        since: "2026-11-02"
+        identity: {commit: "3c0b970e759d557653721fbccf901dba1abaeb8b"}
+        artifacts:
+          hermes-mcp-admin: "sha256:261fc91d936148099e8b9fa28832f97e438140883bab96d901ee957ed0e40362"
+          odoo-mcp-admin: "sha256:5c0c1c4ddce89b21250f8be0b2c18c186e0325e8d963714c9fd2e698166d20de"
+          k8s-mcp-admin: "sha256:89a5fff01e5f330ab72676059db3780ebb9211fdbfd7530253dcf12be117e5b9"
+          nextcloud-mcp-admin: "sha256:83a4fe234fd63919edd34de521d648fad611f4cc25b5259bba29acba30fc58b8"
+        verified: "前版八映像讀回見 evidence/mcp114-publication.json；N8N、VK、OpenDesign、LiteLLM 與新 target 共用 digest，依唯一性規則省略；EMQX 獨立 pin 不重複登記。"
+      - version: "2026.11.01.1201"
+        since: "2026-11-01"
+        identity: {commit: "61097cb81400b42c0b442b79e550eb9d3f72c2ba"}
+        artifacts:
+          hermes-mcp-admin: "sha256:b68bd774654935b5fc3e5886c4d8c8e5ec141129774a709caad9adf3560b7c8a"
+          odoo-mcp-admin: "sha256:ed50ef42c75c03acc3bc276f6a1b25c49fa5d04ef136d7e97cdb9869bba949c5"
+          opendesign-mcp-admin: "sha256:d1fa5dbe240657e3ee12e41096bd9d188d74552093924f4e0f4813781fd22126"
+          nextcloud-mcp-admin: "sha256:25ccfad161c6f5374c9212b32107f2770ada9b686c2486d27280dc3ea44325b8"
+        verified: "前版 Odoo-fixed 八映像讀回見 evidence/mcp113-publication.json；N8N、K8s、VK、LiteLLM 與新 target 共用 digest，其他重用 digest 依唯一性規則省略。"
+      - version: "2026.11.01.0927"
+        since: "2026-11-01"
+        identity: {commit: "429a956825b2367ded195e26e4e29929b80b1272"}
+        artifacts:
+          hermes-mcp-admin: "sha256:defd87288ae6beb430e9b27a62c70a3bd527f7eed0b44542c26f8da16f92d8fa"
+          litellm-mcp-admin: "sha256:2e873fedc97ac7315d51dcea55dcda113ea9d2f083450b9ea0185cccc410c0f4"
+          n8n-mcp-admin: "sha256:3e3b2ff77de1c5da947bcee96902f67f9d9163f9d8fa9cd8e4d5c09f885f93da"
+          odoo-mcp-admin: "sha256:929471c7b3219ba3694c657c8f7854dd3a36f1a5dc5973175adf7ef88e2a4391"
+        verified: "前版 B 八映像讀回見 evidence/mcp112-publication.json；舊 B Odoo digest 屬已知寫入重送 P1，不得作現行目標。與新 target 或其他歷史版重用 digest 省略。"
+      - version: "2026.11.01.0350"
+        since: "2026-11-01"
+        identity: {commit: "169f224d42d2c0e236a62e4d26f155b1a3ed21eb"}
+        artifacts:
+          hermes-mcp-admin: "sha256:9382331f5b9dbb074d7da3be300568c45135ba303477d58b9583c9815e924107"
+          odoo-mcp-admin: "sha256:886f1492a5efe161f174bdb20f779416367f1a67f0c745e594b702bcd3f5dcf2"
+          opendesign-mcp-admin: "sha256:0f776a0c46a10d8dc5740972d9323b9a178a04d2baae4d3f8422982f0aae4cac"
+        verified: "前版八映像讀回見 evidence/mcp109-publication.json；N8N、VK 與新 target，K8s／Nextcloud 與 61097，LiteLLM 與 B history 共用 digest，依唯一性規則省略；EMQX 獨立 pin 不重複登記。"
       - version: "2026.11.01.0312"
         since: "2026-11-01"
         identity: {commit: "6866c7c9293ea0a8b4ab9b51c4155dc11ac889c7"}
@@ -896,13 +931,9 @@ products:
         identity: {commit: "10d8a1db39f59b896f583f7d799047e2eca5f286"}
         artifacts:
           hermes-mcp-admin: "sha256:0c8e5a2cbf8069eca96c999568bde74aa94e95259e7216907ef1526107bdb669"
-          odoo-mcp-admin: "sha256:929471c7b3219ba3694c657c8f7854dd3a36f1a5dc5973175adf7ef88e2a4391"
-          n8n-mcp-admin: "sha256:3e3b2ff77de1c5da947bcee96902f67f9d9163f9d8fa9cd8e4d5c09f885f93da"
-          k8s-mcp-admin: "sha256:89a5fff01e5f330ab72676059db3780ebb9211fdbfd7530253dcf12be117e5b9"
           opendesign-mcp-admin: "sha256:3dac66c0e16a3d503876aa5a59f46c4d2a3e76345a346827077cb133eac9334d"
-          litellm-mcp-admin: "sha256:a559eaf714a2fedeee3b9419cc4c73464e06d7a5c2a5bbb238fd3600333e9e69"
           nextcloud-mcp-admin: "sha256:3cb0e7e186a1016de8e563ac96a8d59ee0916d7d96e51938669b3eb62df1742e"
-        verified: "前版八映像完整讀回見 evidence/mcp106-publication.json；VK 與現行 target 共用 digest，不在此重複登記。"
+        verified: "前版八映像完整讀回見 evidence/mcp106-publication.json；Odoo、N8N 與 B history，K8s、LiteLLM、VK 與現行 target 共用 digest，不在此重複登記。"
       - version: "2026.10.31.1754"
         since: "2026-10-31"
         identity: {commit: "29fa3efb46bc8323444f35465224c35554add8fb"}
